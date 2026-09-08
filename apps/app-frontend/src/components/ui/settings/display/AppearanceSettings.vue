@@ -8,12 +8,18 @@ import {
 } from '@modrinth/ui'
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { type ColorTheme, isDarkTheme, useTheme } from '@/composables/use-theme.ts'
+import { type AccentColor, type ColorTheme, getAccentSwatch, isDarkTheme, useTheme } from '@/composables/use-theme.ts'
 import { type AppSettings, get, set } from '@/helpers/settings.ts'
 import { getOS } from '@/helpers/utils'
 import { appSettingsModalContextKey } from '@/providers/app-settings-modal'
 
 const theme = useTheme()
+
+const accentSwatchDark = computed(() => isDarkTheme(theme.active))
+
+function accentLabel(accent: AccentColor): string {
+	return accent.charAt(0).toUpperCase() + accent.slice(1)
+}
 const auth = injectAuth()
 const { updatePreferences } = injectUserPreferences()
 const settingsModal = inject(appSettingsModalContextKey, null)
@@ -158,5 +164,32 @@ provideAppearanceSettings({
 </script>
 
 <template>
-	<AppearanceSettingsLayout />
+	<div>
+		<AppearanceSettingsLayout />
+		<section class="mt-8 border-0 border-t border-solid border-divider pt-6">
+			<div class="flex flex-col gap-1">
+				<h2 class="m-0 text-xl font-semibold text-contrast">Accent color</h2>
+				<p class="m-0 text-secondary">
+					Pick the accent color used across the app. The logo and icons follow it too.
+				</p>
+			</div>
+			<div class="mt-4 flex flex-wrap gap-2" role="group" aria-label="Accent color">
+				<button
+					v-for="accent in theme.accentOptions"
+					:key="accent"
+					class="h-8 w-8 cursor-pointer rounded-full border-2 border-solid transition-transform hover:scale-110"
+					:class="
+						theme.preferredAccent === accent
+							? 'border-contrast shadow-[0_0_0_2px_var(--color-brand)]'
+							: 'border-transparent'
+					"
+					:style="{ backgroundColor: getAccentSwatch(accent, accentSwatchDark.value) }"
+					:aria-pressed="theme.preferredAccent === accent"
+					:title="accentLabel(accent)"
+					:aria-label="accentLabel(accent)"
+					@click="theme.preferredAccent = accent"
+				/>
+			</div>
+		</section>
+	</div>
 </template>
