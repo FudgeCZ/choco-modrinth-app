@@ -613,6 +613,10 @@ const messages = defineMessages({
 		id: 'app.nav.modrinth-hosting',
 		defaultMessage: 'Modrinth Hosting',
 	},
+	localServers: {
+		id: 'app.nav.local-servers',
+		defaultMessage: 'Local servers',
+	},
 	screenshots: {
 		id: 'app.nav.screenshots',
 		defaultMessage: 'Screenshots',
@@ -2205,6 +2209,13 @@ provideAppUpdateDownloadProgress(appUpdateDownload)
 				"
 			>
 				<ServerStackIcon />
+			</NavButton>
+			<NavButton
+				v-tooltip.right="formatMessage(messages.localServers)"
+				to="/local-servers"
+				:is-primary="(r) => r.path.startsWith('/local-servers')"
+			>
+				<ServerIcon />
 			</NavButton>
 			<suspense>
 				<QuickInstanceSwitcher />

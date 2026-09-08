@@ -14,6 +14,7 @@ pub const LAUNCHER_LOGS_FOLDER_NAME: &str = "launcher_logs";
 pub const INSTANCES_FOLDER_NAME: &str = "profiles";
 pub const METADATA_FOLDER_NAME: &str = "meta";
 pub const SYNCED_OPTIONS_FOLDER_NAME: &str = "synced-options";
+pub const SERVERS_FOLDER_NAME: &str = "servers";
 
 #[derive(Debug)]
 pub struct DirectoryInfo {
@@ -155,6 +156,12 @@ impl DirectoryInfo {
         self.config_dir.join(INSTANCES_FOLDER_NAME)
     }
 
+    /// Directory where locally created ChocoModrinth servers live
+    #[inline]
+    pub fn servers_dir(&self) -> PathBuf {
+        self.config_dir.join(SERVERS_FOLDER_NAME)
+    }
+
     #[inline]
     pub fn synced_options_dir(&self) -> PathBuf {
         self.config_dir.join(SYNCED_OPTIONS_FOLDER_NAME)
@@ -276,6 +283,7 @@ impl DirectoryInfo {
                     INSTANCES_FOLDER_NAME,
                     METADATA_FOLDER_NAME,
                     SYNCED_OPTIONS_FOLDER_NAME,
+                    SERVERS_FOLDER_NAME,
                 ];
 
                 struct MovePath {

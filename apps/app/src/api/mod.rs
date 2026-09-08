@@ -14,6 +14,7 @@ pub mod mr_auth;
 pub mod onboarding_checklist;
 pub mod process;
 pub mod reports;
+pub mod servers;
 pub mod settings;
 pub mod shortcuts;
 pub mod tags;

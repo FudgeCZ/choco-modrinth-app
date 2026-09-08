@@ -14,6 +14,7 @@ pub mod pack;
 pub mod process;
 pub mod reports;
 pub mod server_address;
+pub mod servers;
 pub mod settings;
 pub mod tags;
 pub mod users;

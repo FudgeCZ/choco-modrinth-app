@@ -6,6 +6,11 @@ export default new createRouter({
 	history: createWebHistory(),
 	routes: [
 		{
+			path: '/local-servers',
+			name: 'Local servers',
+			component: () => import('@/pages/LocalServers.vue'),
+		},
+		{
 			path: '/',
 			name: 'Home',
 			component: () => import('@/pages/Index.vue'),

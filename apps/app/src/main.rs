@@ -259,6 +259,7 @@ fn main() {
         .plugin(api::minecraft_skins::init())
         .plugin(api::process::init())
         .plugin(api::reports::init())
+        .plugin(api::servers::init())
         .plugin(api::settings::init())
         .plugin(api::shortcuts::init())
         .plugin(api::tags::init())
@@ -270,6 +271,7 @@ fn main() {
         .plugin(api::friends::init())
         .plugin(api::worlds::init())
         .manage(PendingUpdateData::default())
+        .manage(api::servers::ServerProcessManager::default())
         .invoke_handler(tauri::generate_handler![
             initialize_state,
             is_dev,
