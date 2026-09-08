@@ -22,6 +22,7 @@ import {
 	PlusIcon,
 	RefreshCwIcon,
 	RightArrowIcon,
+	ServerIcon,
 	ServerStackIcon,
 	SettingsIcon,
 	ShirtIcon,

@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
 use std::{env, fs};
 
@@ -33,10 +33,30 @@ fn build_java_jars() {
         dunce::canonicalize(PathBuf::from(env::var_os("OUT_DIR").unwrap()))
             .unwrap();
 
+    let libs_dir = out_dir.join("java/libs");
     println!(
         "cargo::rustc-env=JAVA_JARS_DIR={}",
-        out_dir.join("java/libs").display()
+        libs_dir.display()
     );
+
+    // ChocoModrinth: skip the (multi-minute) Gradle build when the jars are
+    // already up to date. The rerun-if-changed directives above already force
+    // a rebuild of the build script whenever the Java sources change; the
+    // freshness check below covers the case where only the jars are missing.
+    let java_src = dunce::canonicalize("java").unwrap();
+    if libs_dir.exists() {
+        let jar_time = fs::metadata(&libs_dir)
+            .and_then(|m| m.modified())
+            .ok();
+        let src_time = latest_mtime(&java_src);
+        if let (Some(jar_time), Some(src_time)) = (jar_time, src_time) {
+            if jar_time >= src_time {
+                return;
+            }
+        } else {
+            return;
+        }
+    }
 
     let gradle_path = fs::canonicalize(
         #[cfg(target_os = "windows")]
@@ -61,4 +81,27 @@ fn build_java_jars() {
         println!("cargo::error=Gradle build failed with {exit_status}");
         exit(exit_status.code().unwrap_or(1));
     }
+}
+
+/// Newest modification time within a directory tree (used to decide whether
+/// the Gradle-built jars are stale)
+fn latest_mtime(dir: &Path) -> Option<std::time::SystemTime> {
+    let mut latest = fs::metadata(dir).and_then(|m| m.modified()).ok();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(t) = latest_mtime(&path)
+                    && latest.is_none_or(|current| t > current)
+                {
+                    latest = Some(t);
+                }
+            } else if let Ok(t) = entry.metadata().and_then(|m| m.modified())
+                && latest.is_none_or(|current| t > current)
+            {
+                latest = Some(t);
+            }
+        }
+    }
+    latest
 }

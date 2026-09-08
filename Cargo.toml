@@ -306,13 +306,19 @@ opt-level = 3
 [profile.release]
 opt-level = "s"  # Optimize for binary size
 strip = true  # Remove debug symbols
-lto = true  # Enables link to optimizations
+lto = "thin"  # Thin LTO: much faster release builds than full LTO
 panic = "abort"  # Strip expensive panic clean-up logic
 
 # Specific profile for labrinth production builds
 [profile.release-labrinth]
 inherits = "release"
+
+# Fast iteration profile for local builds: no LTO + incremental compilation
+# (much faster rebuilds; slightly larger and less optimized binary)
+[profile.release-fast]
+inherits = "release"
 opt-level = 2
 strip = false  # Keep debug symbols for Sentry
-lto = "thin"  # Enable LTO but keep compile times reasonable
+lto = false  # Disable LTO for faster link times
+incremental = true  # Incremental compilation for faster local rebuilds
 panic = "unwind"  # Don't exit the whole app on panic in production

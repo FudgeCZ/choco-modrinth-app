@@ -204,6 +204,8 @@ fn main() {
                 InlinedPlugin::new()
                     .commands(&[
                         "instance_remove",
+                        "instance_compress",
+                        "instance_decompress",
                         "instance_get",
                         "instance_get_many",
                         "instance_get_projects",
@@ -445,6 +447,24 @@ fn main() {
                         "get_server_status",
                         "start_join_singleplayer_world",
                         "start_join_server",
+                    ])
+                    .default_permission(
+                        DefaultPermissionRule::AllowAllCommands,
+                    ),
+            )
+            .plugin(
+                "servers",
+                InlinedPlugin::new()
+                    .commands(&[
+                        "servers_list",
+                        "servers_create",
+                        "servers_delete",
+                        "servers_minecraft_versions",
+                        "servers_loader_versions",
+                        "servers_run",
+                        "servers_stop",
+                        "servers_is_running",
+                        "servers_open_folder",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,
