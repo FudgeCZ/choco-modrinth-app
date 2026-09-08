@@ -342,7 +342,7 @@
     "message": "Bekijk instantie"
   },
   "app.hosting.update-required.description": {
-    "message": "Je moet bijwerken om Modrinth Hosting te gebruiken via de Modrinth App"
+    "message": "Je moet bijwerken om Modrinth Hosting te gebruiken via de ChocoModrinth"
   },
   "app.hosting.update-required.download": {
     "message": "Update aan het downloaden"
@@ -1896,13 +1896,13 @@
     "message": "Hoi, Modrinth-gebruiker!"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Modrinth App v{version} is klaar met downloaden. Herlaad om nu te updaten, of automatisch wanneer je de Modrinth App afsluit."
+    "message": "ChocoModrinth v{version} is klaar met downloaden. Herlaad om nu te updaten, of automatisch wanneer je de ChocoModrinth afsluit."
   },
   "app.update-popup.body.linux": {
     "message": "De Modrinth-app v{version} is beschikbaar. Gebruik je pakketbeheerder om bij te werken en zo de nieuwste functies en verbeteringen te krijgen!"
   },
   "app.update-popup.body.metered": {
-    "message": "Modrinth App v{version} is nu beschikbaar! Omdat je nu op een netwerk met datalimiet zit, is de download niet automatisch gestart."
+    "message": "ChocoModrinth v{version} is nu beschikbaar! Omdat je nu op een netwerk met datalimiet zit, is de download niet automatisch gestart."
   },
   "app.update-popup.changelog": {
     "message": "Wijzigingen"

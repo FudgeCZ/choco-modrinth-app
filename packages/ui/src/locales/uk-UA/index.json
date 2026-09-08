@@ -2901,16 +2901,16 @@
     "defaultMessage": "Зберігання файлів оновленими, попри зміни сервера"
   },
   "modal.open-in-app.get-app": {
-    "defaultMessage": "Отримати Modrinth App"
+    "defaultMessage": "Отримати ChocoModrinth"
   },
   "modal.open-in-app.opening-automatically": {
-    "defaultMessage": "Modrinth App відкриється автоматично…"
+    "defaultMessage": "ChocoModrinth відкриється автоматично…"
   },
   "modal.open-in-app.title": {
-    "defaultMessage": "Відкриття Modrinth App"
+    "defaultMessage": "Відкриття ChocoModrinth"
   },
   "modal.open-in-app.why-use": {
-    "defaultMessage": "Навіщо використовувати Modrinth App"
+    "defaultMessage": "Навіщо використовувати ChocoModrinth"
   },
   "notification.error.title": {
     "defaultMessage": "Виникла помилка"
@@ -5070,7 +5070,7 @@
     "defaultMessage": "Новий сервер"
   },
   "servers.list-empty.no-servers-description": {
-    "defaultMessage": "Установлюйте моди, запрошуйте друзів і грайте разом із Modrinth App."
+    "defaultMessage": "Установлюйте моди, запрошуйте друзів і грайте разом із ChocoModrinth."
   },
   "servers.list-empty.one-click-mod-installs-description": {
     "defaultMessage": "Виберіть свої улюблені моди, а ми подбаємо про решту."
@@ -5577,7 +5577,7 @@
     "defaultMessage": "Результати пошуку"
   },
   "settings.language.coverage.app-tooltip": {
-    "defaultMessage": "Близько {percentage}% Modrinth App доступно цією мовою."
+    "defaultMessage": "Близько {percentage}% ChocoModrinth доступно цією мовою."
   },
   "settings.language.coverage.label": {
     "defaultMessage": "Підтримується {percentage}%"

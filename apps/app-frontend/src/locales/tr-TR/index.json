@@ -342,7 +342,7 @@
     "message": "Kurulumu göster"
   },
   "app.hosting.update-required.description": {
-    "message": "Modrinth Hosting'i Modrinth App'ten kullanmak için güncelleyin"
+    "message": "Modrinth Hosting'i ChocoModrinth'ten kullanmak için güncelleyin"
   },
   "app.hosting.update-required.download": {
     "message": "Güncellemeyi indir"
@@ -351,7 +351,7 @@
     "message": "Heyecanlı Modrinth Botu"
   },
   "app.hosting.update-required.title": {
-    "message": "Modrinth App güncellemesi gerekli"
+    "message": "ChocoModrinth güncellemesi gerekli"
   },
   "app.install.phase.downloading_content": {
     "message": "İçerik indiriliyor"
@@ -1572,7 +1572,7 @@
     "message": "Reklamlar, Modrinth'i mümkün kılıyor ve içerik üreticilerine yapılan ödemeleri finanse ediyor. Partnerlerimiz, reklamları kişiselleştirmek ve performansı ölçmek amacıyla uygulama içinde çerez depolayabilir veya bunlara erişebilir. Aşağıdan tercihinizi yönetebilir veya vazgeçebilirsiniz."
   },
   "app.settings.privacy.discord-rich-presence.description": {
-    "message": "Şu anki Discord aktiviteniz olarak, Modrinth App'i gösterin. Bu, örneğe modlar tarafından eklenen Rich Presence'ı etkilemez. Uygulamayı yeniden başlatmayı gerektirir."
+    "message": "Şu anki Discord aktiviteniz olarak, ChocoModrinth'i gösterin. Bu, örneğe modlar tarafından eklenen Rich Presence'ı etkilemez. Uygulamayı yeniden başlatmayı gerektirir."
   },
   "app.settings.privacy.discord-rich-presence.title": {
     "message": "Discord Rich Presence"
@@ -1617,7 +1617,7 @@
     "message": "Bir uygulama dizinine göz atın"
   },
   "app.settings.resource-management.app-directory.description": {
-    "message": "Modrinth App'in örnekleri ve diğer dosyaları depoladığı yer. Değişiklikler uygulamayı yeniden başlattıktan sonra etki eder."
+    "message": "ChocoModrinth'in örnekleri ve diğer dosyaları depoladığı yer. Değişiklikler uygulamayı yeniden başlattıktan sonra etki eder."
   },
   "app.settings.resource-management.app-directory.select": {
     "message": "Yeni bir uygulama dizini seçin"
@@ -1881,7 +1881,7 @@
     "message": "Aç"
   },
   "app.survey.body": {
-    "message": "Modrinth App deneyiminiz hakkında birkaç soruyu cevaplamak ister misiniz?"
+    "message": "ChocoModrinth deneyiminiz hakkında birkaç soruyu cevaplamak ister misiniz?"
   },
   "app.survey.footer": {
     "message": "Bu geri bildirim doğrudan Modrinth ekibine gidecek ve gelecek güncellemeleri şekillendirecek!"
@@ -1896,13 +1896,13 @@
     "message": "Merhaba Modrinth kullanıcısı!"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Modrinth App v{version} indirildi. Güncellemek için yeniden başlatın veya Modrinth App’i kapattığınızda otomatik olarak güncellenecektir."
+    "message": "ChocoModrinth v{version} indirildi. Güncellemek için yeniden başlatın veya ChocoModrinth’i kapattığınızda otomatik olarak güncellenecektir."
   },
   "app.update-popup.body.linux": {
-    "message": "Modrinth App v{version} yayımlandı. En yeni özellikler ve hata düzeltmeleri için paket yöneticin üzerinden güncelle!"
+    "message": "ChocoModrinth v{version} yayımlandı. En yeni özellikler ve hata düzeltmeleri için paket yöneticin üzerinden güncelle!"
   },
   "app.update-popup.body.metered": {
-    "message": "Modrinth App v{version} mevcut! Kısıtlı bağlantıda olduğunuzdan otomatik olarak indirmedik."
+    "message": "ChocoModrinth v{version} mevcut! Kısıtlı bağlantıda olduğunuzdan otomatik olarak indirmedik."
   },
   "app.update-popup.changelog": {
     "message": "Yama Notları"
@@ -2100,7 +2100,7 @@
     "message": "Paylaşımlı örneğin bağlantısını kaldır"
   },
   "installation-settings.unpublish-shared-instance.modal.admonition-body": {
-    "message": "Bu paylaşımlı örneği Modrinth'in sunucularından kaldırır. Modrinth App'i kullanan kişiler güncelleme almayı bırakır fakat yerel örneğiniz ve içeriği bu cihazda kalacak."
+    "message": "Bu paylaşımlı örneği Modrinth'in sunucularından kaldırır. ChocoModrinth'i kullanan kişiler güncelleme almayı bırakır fakat yerel örneğiniz ve içeriği bu cihazda kalacak."
   },
   "installation-settings.unpublish-shared-instance.modal.admonition-header": {
     "message": "Paylaşımlı örnek yayından kaldırılıyor"

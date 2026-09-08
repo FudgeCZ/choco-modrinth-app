@@ -100,7 +100,7 @@ pub struct State {
     // because creating the state object is fallible (e.g. database missing),
     // but we rely on the app identifier to create the state (data dir).
     //
-    // /// App identifier string (like com.modrinth.ModrinthApp)
+    // /// App identifier string (like com.modrinth.ChocoModrinth)
     // pub app_identifier: String,
     /// Friends socket
     pub friends_socket: FriendsSocket,

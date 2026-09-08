@@ -168,7 +168,7 @@
     "message": "Приховати ім'я"
   },
   "app.appearance-settings.minimize-launcher.description": {
-    "message": "Згортати Modrinth App під час запуску Minecraft."
+    "message": "Згортати ChocoModrinth під час запуску Minecraft."
   },
   "app.appearance-settings.minimize-launcher.title": {
     "message": "Згортати застосунок"
@@ -327,7 +327,7 @@
     "message": "Схвильований бот Modrinth"
   },
   "app.hosting.update-required.title": {
-    "message": "Потрібне оновлення Modrinth App"
+    "message": "Потрібне оновлення ChocoModrinth"
   },
   "app.install.phase.downloading_content": {
     "message": "Завантаження вмісту"
@@ -1092,7 +1092,7 @@
     "message": "Знімки екрану у цій групі будуть розгруповані."
   },
   "app.settings.app-version": {
-    "message": "Modrinth App {version}"
+    "message": "ChocoModrinth {version}"
   },
   "app.settings.default-instance-options.environment-variables.description": {
     "message": "Змінні середовища встановлюються, коли примірник запускається."
@@ -1188,7 +1188,7 @@
     "message": "Реклама підтримує існування Modrinth і фінансує виплати творцям. Наші партнери можуть зберігати й отримувати доступ до cookie в застосунку, щоб персоналізувати рекламу та збирати метрики. Ви можете відмовитися від них або керувати налаштуваннями нижче."
   },
   "app.settings.privacy.discord-rich-presence.description": {
-    "message": "Показувати Modrinth App як вашу поточну активність у Discord. Це не впливає на активність, додану модами. Потребує перезапуску застосунку."
+    "message": "Показувати ChocoModrinth як вашу поточну активність у Discord. Це не впливає на активність, додану модами. Потребує перезапуску застосунку."
   },
   "app.settings.privacy.discord-rich-presence.title": {
     "message": "Discord Rich Presence"
@@ -1233,7 +1233,7 @@
     "message": "Оглянути каталог застосунку"
   },
   "app.settings.resource-management.app-directory.description": {
-    "message": "Де Modrinth App зберігає примірники й інші файли. Зміни набудуть чинності після перезапуску застосунку."
+    "message": "Де ChocoModrinth зберігає примірники й інші файли. Зміни набудуть чинності після перезапуску застосунку."
   },
   "app.settings.resource-management.app-directory.select": {
     "message": "Вибрати новий каталог застосунку"
@@ -1431,7 +1431,7 @@
     "message": "Увімкнути"
   },
   "app.survey.body": {
-    "message": "Не бажаєте відповісти на кілька запитань про ваш досвід користування Modrinth App?"
+    "message": "Не бажаєте відповісти на кілька запитань про ваш досвід користування ChocoModrinth?"
   },
   "app.survey.footer": {
     "message": "Цей відгук надійде безпосередньо команді Modrinth і допоможе у створенні майбутніх оновлень!"
@@ -1446,13 +1446,13 @@
     "message": "Привіт, користувачу Modrinth!"
   },
   "app.update-popup.body.download-complete": {
-    "message": "Modrinth App v{version} завантажено. Перезапустіть, щоб оновити зараз, або це відбудеться автоматично після закриття застосунку."
+    "message": "ChocoModrinth v{version} завантажено. Перезапустіть, щоб оновити зараз, або це відбудеться автоматично після закриття застосунку."
   },
   "app.update-popup.body.linux": {
-    "message": "Modrinth App v{version} вже доступно. Скористайтеся менеджером пакетів, щоб отримати найновіші функції та виправлення!"
+    "message": "ChocoModrinth v{version} вже доступно. Скористайтеся менеджером пакетів, щоб отримати найновіші функції та виправлення!"
   },
   "app.update-popup.body.metered": {
-    "message": "Modrinth App v{version} вже доступно! Оскільки ви використовуєте лімітне підключення, ми не завантажили його автоматично."
+    "message": "ChocoModrinth v{version} вже доступно! Оскільки ви використовуєте лімітне підключення, ми не завантажили його автоматично."
   },
   "app.update-popup.changelog": {
     "message": "Список змін"
@@ -1635,7 +1635,7 @@
     "message": "Відв'язати спільний примірник"
   },
   "installation-settings.unpublish-shared-instance.modal.admonition-body": {
-    "message": "Це видалить спільний примірник із серверів Modrinth. Користувачі Modrinth App припинять отримувати оновлення, але ваш локальний примірник і його вміст залишаться на цьому пристрої."
+    "message": "Це видалить спільний примірник із серверів Modrinth. Користувачі ChocoModrinth припинять отримувати оновлення, але ваш локальний примірник і його вміст залишаться на цьому пристрої."
   },
   "installation-settings.unpublish-shared-instance.modal.admonition-header": {
     "message": "Скасування публікації спільного примірника"

@@ -55,14 +55,14 @@
 			}
 		]
 	},
-	"productName": "Modrinth App",
+	"productName": "ChocoModrinth",
 	"version": "../app-frontend/package.json",
-	"mainBinaryName": "Modrinth App",
-	"identifier": "ModrinthApp",
+	"mainBinaryName": "ChocoModrinth",
+	"identifier": "ChocoModrinth",
 	"plugins": {
 		"deep-link": {
 			"desktop": {
-				"schemes": ["modrinth"]
+				"schemes": ["chocomodrinth"]
 			},
 			"mobile": []
 		}
@@ -77,7 +77,7 @@
 				"fullscreen": false,
 				"height": 800,
 				"resizable": true,
-				"title": "Modrinth App",
+				"title": "ChocoModrinth",
 				"label": "main",
 				"width": 1280,
 				"minHeight": 700,
