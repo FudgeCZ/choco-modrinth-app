@@ -1,39 +1,50 @@
-# ![Modrinth Monorepo Cover](/.github/assets/monorepo_cover.png)
+# ChocoModrinth
 
-![Issues](https://img.shields.io/github/issues-raw/Modrinth/code?color=c78aff&label=issues&style=for-the-badge)
-![Pull Requests](https://img.shields.io/github/issues-pr-raw/Modrinth/code?color=c78aff&label=PRs&style=for-the-badge)
-![Contributors](https://img.shields.io/github/contributors/Modrinth/code?color=c78aff&label=contributors&style=for-the-badge)
-![Lines of Code](https://img.shields.io/endpoint?url=https://loctopus.creeperkatze.dev/github/modrinth/code/badge?style=flat&logoColor=white&color=c78aff&style=for-the-badge)
-![Commit Activity](https://img.shields.io/github/commit-activity/m/Modrinth/code?color=c78aff&label=commits&style=for-the-badge)
-![Last Commit](https://img.shields.io/github/last-commit/Modrinth/code?color=c78aff&label=last%20commit&style=for-the-badge)
+A fork of the [Modrinth App](https://github.com/modrinth/code) — a fast, cross-platform Minecraft launcher — with a chocolate theme and extra power features.
 
-## Modrinth Monorepo
+Based on upstream release **v0.20.0**.
 
-Welcome to the Modrinth Monorepo, the primary codebase for the Modrinth web interface and app. It contains ![Lines of code](https://img.shields.io/endpoint?url=https://loctopus.creeperkatze.dev/github/modrinth/code/badge%3Fformat%3Dhuman&logoColor=white&color=black&label=) lines of code and has ![Contributors](https://img.shields.io/github/contributors/Modrinth/code?color=black&label=) contributors!
+## Features
 
-If you're not a developer and you've stumbled upon this repository, you can access the web interface on the [Modrinth website](https://modrinth.com) and download the latest release of the app [here](https://modrinth.com/app).
+All Modrinth App features (Modrinth login, modpack browsing and installing, mod management, instances, skins, screenshots) plus:
+
+### 🍫 ChocoModrinth branding
+
+- Custom chocolate-bar logo and icons
+- Cocoa-brown accent color by default
+- **Accent color picker** in Settings → Appearance: switch between chocolate, green, blue, red, purple, orange and pink — the logo and all UI follow the chosen color
+
+### 🗜️ Profile compression (7z)
+
+- **Compress profile (7z)** action in the instance page menu and the library right-click menu
+- Maximum LZMA2 compression via the 7z format (pure Rust, no external tools needed)
+- **Screenshots stay visible while compressed** — the screenshots folder is kept outside the archive, so the in-app gallery keeps working
+- Launching a compressed profile **auto-extracts it** through the normal launch flow, and the profile is **compressed again automatically when the game exits**
+
+### 🖥️ Local server creator
+
+- Create local Minecraft servers from inside the launcher: pick a name, Minecraft version, loader, RAM, port, MOTD, difficulty, game mode, max players and online mode
+- Automatic downloads for **Vanilla, Fabric, Quilt, Forge, NeoForge, Paper and Purpur** (loader jars and installers, with the required Java runtime installed automatically)
+- Generates `eula.txt` (explicit EULA acceptance checkbox), `server.properties` and start scripts
+- **Run / stop servers from the launcher** with a live console view
+- Find it under the **Local servers** entry in the sidebar
 
 ## Development
 
-This repository contains two primary packages. For detailed development information, please refer to their respective guides:
+Same toolchain as upstream:
 
-- [Website frontend](https://docs.modrinth.com/contributing/knossos/)
-- [Desktop app](https://docs.modrinth.com/contributing/theseus/)
+- Node.js >= 24.15 (see `.nvmrc`) and pnpm 10 (`corepack enable`)
+- Rust toolchain (see `rust-toolchain.toml`; rustup installs the pinned version automatically)
 
-## Contributing
+```bash
+pnpm install
+pnpm app:dev   # run the desktop app in dev mode
+pnpm app:build # build the Windows NSIS installer
+```
 
-We welcome contributions! Before submitting any contributions, please read our [contributing guidelines](https://docs.modrinth.com/contributing/getting-started/).
+The Windows installer is produced at `apps/app/target/release/bundle/nsis/`.
 
-If you plan to fork this repository for your own purposes, please review our [copying guidelines](COPYING.md).
+## Credits & license
 
-## Security
-
-If you discover a security vulnerability within our codebase, please follow our [responsible disclosure guidelines](https://modrinth.com/legal/security).
-
-## Support
-
-If you need help with the Modrinth web interface or app, please visit our [support page](https://support.modrinth.com). For general inquiries, you can also join our [Discord server](https://discord.modrinth.com).
-
-## License
-
-All packages in this repository are licensed under their respective licenses. Refer to the LICENSE file in each package for more information.
+- Upstream: [Modrinth/code](https://github.com/modrinth/code) — all code is licensed **GPL-3.0**, as required by the upstream license. Modrinth branding assets have been replaced as required by the upstream [copying guidelines](COPYING.md).
+- Some upstream artwork (e.g. Rinthbot mascots in a few empty states) may still appear; all primary branding (name, logo, icons, colors) has been replaced.
