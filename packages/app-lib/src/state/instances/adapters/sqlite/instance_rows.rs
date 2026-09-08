@@ -27,6 +27,7 @@ pub(crate) struct InstanceRow {
     pub update_channel: String,
     pub name: String,
     pub icon_path: Option<String>,
+    pub compressed: i64,
     pub created: i64,
     pub modified: i64,
     pub last_played: Option<i64>,
@@ -49,6 +50,7 @@ impl TryFrom<InstanceRow> for Instance {
             update_channel: ReleaseChannel::from_key(&row.update_channel),
             name: row.name,
             icon_path: row.icon_path,
+            compressed: row.compressed != 0,
             created: timestamp(row.created),
             modified: timestamp(row.modified),
             last_played: row.last_played.and_then(optional_timestamp),
@@ -198,6 +200,7 @@ struct InstanceMetadataRow {
     icon_path: Option<String>,
     icon_config_background: Option<String>,
     icon_config_symbol: Option<String>,
+    compressed: i64,
     created: i64,
     modified: i64,
     last_played: Option<i64>,
@@ -268,6 +271,7 @@ impl InstanceMetadataRow {
             update_channel: self.update_channel,
             name: self.name,
             icon_path: self.icon_path,
+            compressed: self.compressed,
             created: self.created,
             modified: self.modified,
             last_played: self.last_played,
@@ -671,6 +675,7 @@ macro_rules! query_instance_metadata {
                     i.update_channel AS "update_channel!: String",
                     i.name AS "name!: String",
                     i.icon_path AS "icon_path?: String",
+                    i.compressed AS "compressed!: i64",
                     config.background AS "icon_config_background?: String",
                     config.symbol AS "icon_config_symbol?: String",
                     i.created AS "created!: i64",
@@ -780,6 +785,19 @@ pub(crate) async fn update_instance_icon_config(
         .await?;
     }
 
+    Ok(())
+}
+
+pub(crate) async fn set_instance_compressed(
+    instance_id: &str,
+    compressed: bool,
+    pool: &SqlitePool,
+) -> crate::Result<()> {
+    sqlx::query("UPDATE instances SET compressed = ? WHERE id = ?")
+        .bind(if compressed { 1 } else { 0 })
+        .bind(instance_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

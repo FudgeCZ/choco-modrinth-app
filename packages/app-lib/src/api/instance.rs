@@ -2,6 +2,7 @@
 
 mod content;
 mod content_set_diff;
+pub mod compress;
 mod export_mrpack;
 mod get;
 mod groups;

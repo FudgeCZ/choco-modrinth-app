@@ -28,6 +28,14 @@ export async function remove(instanceId: string): Promise<void> {
 	return await invoke('plugin:instance|instance_remove', { instanceId })
 }
 
+export async function compress_instance(instanceId: string): Promise<void> {
+	return await invoke('plugin:instance|instance_compress', { instanceId })
+}
+
+export async function decompress_instance(instanceId: string): Promise<void> {
+	return await invoke('plugin:instance|instance_decompress', { instanceId })
+}
+
 export async function get(instanceId: string): Promise<GameInstance | null> {
 	return await invoke('plugin:instance|instance_get', { instanceId })
 }

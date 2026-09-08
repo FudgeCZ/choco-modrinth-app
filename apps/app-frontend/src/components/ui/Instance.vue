@@ -1,5 +1,6 @@
 <script setup>
 import {
+	ArchiveIcon,
 	DownloadIcon,
 	GameIcon,
 	PlayIcon,
@@ -303,6 +304,13 @@ onMounted(() => {
 					<GameIcon class="shrink-0" />
 					<span class="text-sm capitalize">
 						{{ instance.loader }} {{ instance.game_version }}
+					</span>
+					<span
+						v-if="instance.compressed"
+						class="ml-auto flex items-center gap-1 rounded-full border-0 border-solid px-2 py-0.5 text-xs border-brand bg-brand-highlight text-brand"
+					>
+						<ArchiveIcon class="shrink-0 size-3" aria-hidden="true" />
+						Compressed
 					</span>
 				</div>
 			</div>

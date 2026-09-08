@@ -10,7 +10,7 @@
 			/>
 		</template>
 
-		<template v-if="instance.shared_instance || instance.quarantined" #badges>
+		<template v-if="instance.shared_instance || instance.quarantined || instance.compressed" #badges>
 			<PageHeaderBadgeItem
 				v-if="instance.quarantined"
 				:icon="LockIcon"
@@ -20,13 +20,21 @@
 				Locked
 			</PageHeaderBadgeItem>
 			<PageHeaderBadgeItem
-				v-else
+				v-else-if="instance.shared_instance"
 				:tooltip="sharedInstanceTooltip"
 				aria-label="Shared instance information"
 				class="!border-blue !bg-highlight-blue !text-blue"
 			>
 				Shared
 				<UnknownIcon class="block size-4 shrink-0 text-current" aria-hidden="true" />
+			</PageHeaderBadgeItem>
+			<PageHeaderBadgeItem
+				v-else
+				:icon="ArchiveIcon"
+				aria-label="Compressed profile"
+				class="!border-brand !bg-brand-highlight !text-brand"
+			>
+				{{ formatMessage(messages.compressedBadge) }}
 			</PageHeaderBadgeItem>
 		</template>
 
@@ -170,6 +178,7 @@
 <script setup lang="ts">
 import type { Labrinth } from '@modrinth/api-client'
 import {
+	ArchiveIcon,
 	ClockIcon,
 	DownloadIcon,
 	ExternalIcon,
@@ -184,7 +193,13 @@ import {
 	TimerIcon,
 	UnknownIcon,
 } from '@modrinth/assets'
-import { Button, IconButton, SplitButton, TeleportOverflowMenu } from '@modrinth/ui'
+import {
+	Button,
+	IconButton,
+	injectNotificationManager,
+	SplitButton,
+	TeleportOverflowMenu,
+} from '@modrinth/ui'
 import {
 	Avatar,
 	type ButtonMenuOption,
@@ -203,11 +218,25 @@ import {
 } from '@modrinth/ui'
 import { computed } from 'vue'
 
+import { toError } from '@/helpers/errors'
+import { compress_instance, decompress_instance } from '@/helpers/instance'
 import type { GameInstance } from '@/helpers/types'
 
 import InstanceHeaderServerMetadata from './instance-page-header-server-metadata.vue'
 
 const messages = defineMessages({
+	compressInstance: {
+		id: 'instance.action.compress',
+		defaultMessage: 'Compress profile (7z)',
+	},
+	decompressInstance: {
+		id: 'instance.action.decompress',
+		defaultMessage: 'Decompress profile',
+	},
+	compressedBadge: {
+		id: 'instance.badge.compressed',
+		defaultMessage: 'Compressed',
+	},
 	createShortcut: {
 		id: 'instance.action.create-shortcut',
 		defaultMessage: 'Create shortcut',
@@ -368,6 +397,19 @@ const moreActions = computed<ButtonMenuOption[]>(() => {
 		},
 	]
 
+	if (!props.instance.quarantined && props.instance.install_stage === 'installed') {
+		actions.push({
+			id: 'compress-profile',
+			label: formatMessage(
+				props.instance.compressed
+					? messages.decompressInstance
+					: messages.compressInstance,
+			),
+			icon: ArchiveIcon,
+			action: () => void toggleCompress(),
+		})
+	}
+
 	if (!props.instance.quarantined) {
 		actions.push(
 			{
@@ -400,4 +442,18 @@ const moreActions = computed<ButtonMenuOption[]>(() => {
 
 	return actions
 })
+
+const { handleError } = injectNotificationManager()
+
+async function toggleCompress() {
+	try {
+		if (props.instance.compressed) {
+			await decompress_instance(props.instance.id)
+		} else {
+			await compress_instance(props.instance.id)
+		}
+	} catch (error) {
+		handleError(toError(error))
+	}
+}
 </script>

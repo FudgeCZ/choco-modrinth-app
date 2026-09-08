@@ -26,6 +26,8 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("instance")
         .invoke_handler(tauri::generate_handler![
             instance_remove,
+            instance_compress,
+            instance_decompress,
             instance_get,
             instance_get_many,
             instance_list,
@@ -134,6 +136,7 @@ pub struct Instance {
     pub name: String,
     pub icon_path: Option<String>,
     pub icon_config: Option<theseus::data::InstanceIconConfig>,
+    pub compressed: bool,
     pub game_version: String,
     pub protocol_version: Option<u32>,
     pub loader: ModLoader,
@@ -314,6 +317,7 @@ impl From<InstanceMetadata> for Instance {
             name: metadata.instance.name,
             icon_path: metadata.instance.icon_path,
             icon_config: metadata.icon_config,
+            compressed: metadata.instance.compressed,
             game_version: metadata.applied_content_set.game_version,
             protocol_version: metadata.applied_content_set.protocol_version,
             loader: metadata.applied_content_set.loader,
@@ -523,6 +527,18 @@ fn edit_to_core(edit_instance: EditInstance) -> Result<CoreEditInstance> {
 #[tauri::command]
 pub async fn instance_remove(instance_id: &str) -> Result<()> {
     theseus::instance::remove(instance_id).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn instance_compress(instance_id: &str) -> Result<()> {
+    theseus::instance::compress::compress(instance_id).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn instance_decompress(instance_id: &str) -> Result<()> {
+    theseus::instance::compress::decompress(instance_id).await?;
     Ok(())
 }
 

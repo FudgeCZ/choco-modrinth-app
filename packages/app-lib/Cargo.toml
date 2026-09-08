@@ -121,6 +121,10 @@ uuid = { workspace = true, features = ["serde", "v4"] }
 whoami = { workspace = true }
 zbus = { workspace = true }
 zip = { workspace = true }
+sevenz-rust2 = { version = "0.22", default-features = false, features = [
+  "compress",
+  "util",
+] }
 
 [build-dependencies]
 dotenvy = { workspace = true }

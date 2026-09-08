@@ -67,6 +67,11 @@
         "name": "recent_time_played",
         "ordinal": 12,
         "type_info": "Integer"
+      },
+      {
+        "name": "compressed",
+        "ordinal": 13,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -84,6 +89,7 @@
       false,
       false,
       true,
+      false,
       false,
       false
     ]

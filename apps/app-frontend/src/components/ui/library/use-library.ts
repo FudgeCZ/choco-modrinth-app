@@ -1,5 +1,6 @@
 import type { Labrinth } from '@modrinth/api-client'
 import {
+	ArchiveIcon,
 	ClipboardCopyIcon,
 	EditIcon,
 	EyeIcon,
@@ -40,7 +41,7 @@ import { trackEvent } from '@/helpers/analytics'
 import { get_project_v3_many } from '@/helpers/cache.js'
 import { toError } from '@/helpers/errors'
 import { install_duplicate_instance } from '@/helpers/install'
-import { edit, edit_icon, remove } from '@/helpers/instance'
+import { edit, edit_icon, remove, compress_instance, decompress_instance } from '@/helpers/instance'
 import {
 	create_group as createInstanceGroup,
 	delete_group as deleteInstanceGroup,
@@ -182,6 +183,14 @@ const instanceActionMessages = defineMessages({
 	removeFromGroup: {
 		id: 'app.library.instance.action.remove-from-group',
 		defaultMessage: 'Remove from group',
+	},
+	compressInstance: {
+		id: 'app.library.instance.action.compress',
+		defaultMessage: 'Compress profile (7z)',
+	},
+	decompressInstance: {
+		id: 'app.library.instance.action.decompress',
+		defaultMessage: 'Decompress profile',
 	},
 })
 
@@ -1261,6 +1270,18 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 		},
 	]
 
+	const toggleCompressInstance = async (item: InstanceCard) => {
+		try {
+			if (item.instance.compressed) {
+				await decompress_instance(item.instance.id)
+			} else {
+				await compress_instance(item.instance.id)
+			}
+		} catch (error) {
+			handleError(toError(error))
+		}
+	}
+
 	const handleInstanceContextMenu = (
 		event: MouseEvent,
 		item: InstanceCard,
@@ -1335,6 +1356,17 @@ function createLibraryState(instances: Ref<GameInstance[]>) {
 				label: formatMessage(instanceActionMessages.openFolder),
 				icon: FolderOpenIcon,
 				action: () => void item.openFolder(),
+			},
+			{
+				id: 'compress',
+				label: formatMessage(
+					item.instance.compressed
+						? instanceActionMessages.decompressInstance
+						: instanceActionMessages.compressInstance,
+				),
+				icon: ArchiveIcon,
+				shown: !item.instance.quarantined && item.instance.install_stage === 'installed',
+				action: () => void toggleCompressInstance(item),
 			},
 			{
 				id: 'copy',

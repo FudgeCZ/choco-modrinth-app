@@ -56,6 +56,9 @@ async fn run_credentials(
     quick_play_type: QuickPlayType,
 ) -> crate::Result<ProcessMetadata> {
     let state = State::get().await?;
+    // ChocoModrinth: extract compressed profiles before launching; the profile
+    // is compressed again once the game exits.
+    super::compress::ensure_extracted_for_launch(instance_id).await?;
     let settings = Settings::get(&state.pool).await?;
     let context =
         crate::state::instances::commands::get_instance_launch_context(

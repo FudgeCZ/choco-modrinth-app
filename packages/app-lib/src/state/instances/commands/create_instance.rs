@@ -74,6 +74,7 @@ pub(crate) async fn create_instance(
             update_channel: ReleaseChannel::Release,
             name: input.name,
             icon_path,
+            compressed: false,
             created: now,
             modified: now,
             last_played: None,

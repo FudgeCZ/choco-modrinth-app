@@ -972,6 +972,22 @@ impl Process {
             }
         });
 
+        // ChocoModrinth: re-compress instances flagged as compressed after play
+        let recompress_instance_id = instance_id.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::api::instance::compress::recompress_after_exit(
+                &recompress_instance_id,
+            )
+            .await
+            {
+                tracing::warn!(
+                    "Failed to recompress instance {}: {}",
+                    recompress_instance_id,
+                    e
+                );
+            }
+        });
+
         let logs_folder = state.directories.instance_logs_dir(&instance_path);
         let log_path = logs_folder.join(LAUNCHER_LOG_PATH);
 
