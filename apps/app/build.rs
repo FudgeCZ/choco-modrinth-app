@@ -464,6 +464,7 @@ fn main() {
                         "servers_run",
                         "servers_stop",
                         "servers_is_running",
+                        "servers_sync_profile_content",
                         "servers_open_folder",
                     ])
                     .default_permission(

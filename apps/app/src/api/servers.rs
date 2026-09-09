@@ -21,6 +21,8 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .invoke_handler(tauri::generate_handler![
             servers_list,
             servers_create,
+            servers_create_from_profile,
+            servers_sync_profile_content,
             servers_delete,
             servers_minecraft_versions,
             servers_loader_versions,
@@ -89,6 +91,34 @@ pub async fn servers_is_running(
     manager: State<'_, ServerProcessManager>,
 ) -> Result<bool> {
     Ok(manager.processes.lock().await.contains_key(&server_id))
+}
+
+#[tauri::command]
+pub async fn servers_create_from_profile(
+    instance_id: String,
+    save_name: Option<String>,
+    copy_mods: bool,
+    copy_config: bool,
+    accept_eula: bool,
+    ram_mb: u32,
+    port: u16,
+) -> Result<ChocoServer> {
+    Ok(theseus::servers::create_server_from_profile(
+        instance_id,
+        save_name,
+        copy_mods,
+        copy_config,
+        accept_eula,
+        ram_mb,
+        port,
+    )
+    .await?)
+}
+
+#[tauri::command]
+pub async fn servers_sync_profile_content(server_id: String) -> Result<()> {
+    theseus::servers::sync_profile_server(server_id).await?;
+    Ok(())
 }
 
 #[tauri::command]

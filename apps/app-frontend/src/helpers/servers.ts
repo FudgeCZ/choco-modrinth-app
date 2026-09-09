@@ -23,6 +23,8 @@ export type ChocoServer = {
 	port: number
 	eula_accepted: boolean
 	java_path?: string | null
+	linked_instance_id?: string | null
+	icon_file?: string | null
 	created: string
 }
 
@@ -39,6 +41,9 @@ export type CreateServerOptions = {
 	max_players?: number | null
 	online_mode?: boolean | null
 	accept_eula: boolean
+	level_name?: string | null
+	linked_instance_id?: string | null
+	icon_path?: string | null
 }
 
 export type ServerLoaderVersion = {
@@ -52,6 +57,22 @@ export async function list_servers(): Promise<ChocoServer[]> {
 
 export async function create_server(options: CreateServerOptions): Promise<ChocoServer> {
 	return await invoke('plugin:servers|servers_create', { options })
+}
+
+export async function create_server_from_profile(options: {
+	instanceId: string
+	saveName?: string | null
+	copyMods: boolean
+	copyConfig: boolean
+	acceptEula: boolean
+	ramMb: number
+	port: number
+}): Promise<ChocoServer> {
+	return await invoke('plugin:servers|servers_create_from_profile', options)
+}
+
+export async function sync_profile_content(serverId: string): Promise<void> {
+	return await invoke('plugin:servers|servers_sync_profile_content', { serverId })
 }
 
 export async function delete_server(serverId: string): Promise<void> {

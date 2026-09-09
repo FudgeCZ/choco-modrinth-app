@@ -24,10 +24,15 @@ All Modrinth App features (Modrinth login, modpack browsing and installing, mod 
 ### 🖥️ Local server creator
 
 - Create local Minecraft servers from inside the launcher: pick a name, Minecraft version, loader, RAM, port, MOTD, difficulty, game mode, max players and online mode
+- **Two creation modes**: from scratch, or **from an existing profile** — inherits the profile's version/loader, lets you pick one of its singleplayer saves as the server world, copies mods (automatically excluding client-only mods via Modrinth metadata) and the config folder, reuses the profile icon, and stays linked for one-click "Sync from profile" updates
 - Automatic downloads for **Vanilla, Fabric, Quilt, Forge, NeoForge, Paper and Purpur** (loader jars and installers, with the required Java runtime installed automatically)
 - Generates `eula.txt` (explicit EULA acceptance checkbox), `server.properties` and start scripts
 - **Run / stop servers from the launcher** with a live console view
 - Find it under the **Local servers** entry in the sidebar
+
+### 📥 Profile import
+
+- Imports profiles from the **official Modrinth App** directly (shown automatically in the "Import from launcher" flow when it's installed), alongside MultiMC, Prism, ATLauncher, GDLauncher and CurseForge
 
 ## Development
 

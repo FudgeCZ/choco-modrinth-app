@@ -1,7 +1,7 @@
 //! ChocoModrinth local server creator: downloads and manages local Minecraft
 //! servers (jar downloads, EULA, server.properties, start scripts).
 
-use crate::state::State;
+use crate::state::{ModLoader, State};
 use crate::util::fetch::{self, DownloadMeta};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -70,6 +70,16 @@ impl ServerLoader {
             Self::Vanilla | Self::Fabric | Self::Quilt | Self::Paper | Self::Purpur
         )
     }
+
+    pub fn from_mod_loader(loader: ModLoader) -> Self {
+        match loader {
+            ModLoader::Vanilla => Self::Vanilla,
+            ModLoader::Fabric => Self::Fabric,
+            ModLoader::Forge => Self::Forge,
+            ModLoader::Quilt => Self::Quilt,
+            ModLoader::NeoForge => Self::NeoForge,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -87,6 +97,12 @@ pub struct ChocoServer {
     pub eula_accepted: bool,
     /// Path of the Java runtime managed by the launcher
     pub java_path: Option<String>,
+    /// Instance this server was created from and stays linked to (mods/config sync)
+    #[serde(default)]
+    pub linked_instance_id: Option<String>,
+    /// Server icon file inside the server folder (for the Servers page)
+    #[serde(default)]
+    pub icon_file: Option<String>,
     pub created: DateTime<Utc>,
 }
 
@@ -104,6 +120,13 @@ pub struct CreateServerOptions {
     pub max_players: Option<u32>,
     pub online_mode: Option<bool>,
     pub accept_eula: bool,
+    #[serde(default)]
+    pub level_name: Option<String>,
+    #[serde(default)]
+    pub linked_instance_id: Option<String>,
+    /// Source icon file (e.g. the profile icon) to copy into the server folder
+    #[serde(default)]
+    pub icon_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -754,13 +777,15 @@ fn write_server_config(
          max-players={}\n\
          online-mode={}\n\
          enable-rcon=false\n\
-         view-distance=10\n",
+         view-distance=10\n\
+         level-name={}\n",
         opts.port,
         opts.motd.as_deref().unwrap_or("A ChocoModrinth server"),
         opts.difficulty.as_deref().unwrap_or("normal"),
         opts.gamemode.as_deref().unwrap_or("survival"),
         opts.max_players.unwrap_or(20),
         opts.online_mode.unwrap_or(true),
+        opts.level_name.as_deref().unwrap_or("world"),
     );
     write_text_file(&dir.join("server.properties"), &properties)?;
 
@@ -878,6 +903,21 @@ pub async fn create_server(opts: CreateServerOptions) -> crate::Result<ChocoServ
 
     write_server_config(&dir, &opts, &jar_file, &java_path)?;
 
+    // Profile icon → server-icon.png (shown in the multiplayer server list)
+    let mut icon_file = None;
+    if let Some(icon_src) = &opts.icon_path {
+        let src = Path::new(icon_src);
+        let is_png = src
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("png"));
+        if src.exists() && is_png {
+            let dest = dir.join("server-icon.png");
+            if tokio::fs::copy(src, &dest).await.is_ok() {
+                icon_file = Some("server-icon.png".to_string());
+            }
+        }
+    }
+
     let server = ChocoServer {
         id: format!("local:{}", uuid::Uuid::new_v4()),
         name: opts.name.clone(),
@@ -890,6 +930,8 @@ pub async fn create_server(opts: CreateServerOptions) -> crate::Result<ChocoServ
         port: opts.port,
         eula_accepted: opts.accept_eula,
         java_path: Some(java_path.to_string_lossy().to_string()),
+        linked_instance_id: opts.linked_instance_id.clone(),
+        icon_file,
         created: Utc::now(),
     };
 
@@ -897,4 +939,323 @@ pub async fn create_server(opts: CreateServerOptions) -> crate::Result<ChocoServ
     write_servers_index(&state, &servers).await?;
 
     Ok(server)
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProfileSyncReport {
+    pub mods_copied: u32,
+    pub mods_skipped_client_only: u32,
+    pub config_copied: bool,
+    pub world_copied: bool,
+}
+
+fn sanitize_level_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .collect();
+    if cleaned.is_empty() { "world".to_string() } else { cleaned }
+}
+
+/// Creates a server from an existing profile (instance): inherits the game
+/// version and loader, optionally copies a save as the server world plus mods
+/// (client-only mods excluded) and the config folder.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_server_from_profile(
+    instance_id: String,
+    save_name: Option<String>,
+    copy_mods: bool,
+    copy_config: bool,
+    accept_eula: bool,
+    ram_mb: u32,
+    port: u16,
+) -> crate::Result<ChocoServer> {
+    let state = State::get().await?;
+    let metadata = crate::state::get_instance(&instance_id, &state.pool)
+        .await?
+        .ok_or_else(|| {
+            crate::ErrorKind::InputError(format!(
+                "Profile {instance_id} was not found"
+            ))
+        })?;
+
+    let save_name = match &save_name {
+        Some(name) => Some(sanitize_level_name(name)),
+        None => None,
+    };
+
+    let options = CreateServerOptions {
+        name: format!("{} Server", metadata.instance.name),
+        game_version: metadata.applied_content_set.game_version.clone(),
+        loader: ServerLoader::from_mod_loader(metadata.applied_content_set.loader),
+        loader_version: metadata.applied_content_set.loader_version.clone(),
+        ram_mb,
+        port,
+        motd: save_name.clone(),
+        difficulty: Some("normal".to_string()),
+        gamemode: Some("survival".to_string()),
+        max_players: Some(20),
+        online_mode: Some(true),
+        accept_eula,
+        level_name: save_name.clone(),
+        linked_instance_id: Some(instance_id.clone()),
+        icon_path: metadata.instance.icon_path.clone(),
+    };
+
+    let server = create_server(options).await?;
+
+    let server_dir = state.directories.servers_dir().join(&server.path);
+    let instance_dir = state
+        .directories
+        .instances_dir()
+        .join(&metadata.instance.path);
+
+    // Copy the selected save as the server world
+    if let Some(save) = &save_name {
+        let source = instance_dir.join("saves").join(save);
+        if source.is_dir() {
+            copy_dir_all(&source, &server_dir.join(save)).await?;
+        }
+    }
+
+    // Copy mods (client-only excluded) and config folder
+    sync_profile_content(
+        &server,
+        &instance_id,
+        copy_mods,
+        copy_config,
+    )
+    .await?;
+
+    Ok(server)
+}
+
+/// Re-copies mods (client-only excluded) and config from the linked profile
+pub async fn sync_profile_server(server_id: String) -> crate::Result<ProfileSyncReport> {
+    let servers = list_servers().await?;
+    let server = servers
+        .into_iter()
+        .find(|s| s.id == server_id)
+        .ok_or_else(|| {
+            crate::ErrorKind::InputError("Server not found".to_string())
+        })?;
+
+    let instance_id = server.linked_instance_id.clone().ok_or_else(|| {
+        crate::ErrorKind::InputError(
+            "This server is not linked to a profile".to_string(),
+        )
+    })?;
+
+    sync_profile_content(&server, &instance_id, true, true).await
+}
+
+/// Copies mods (excluding client-only mods reported by Modrinth) and the
+/// config folder from the linked profile into the server folder
+async fn sync_profile_content(
+    server: &ChocoServer,
+    instance_id: &str,
+    copy_mods: bool,
+    copy_config: bool,
+) -> crate::Result<ProfileSyncReport> {
+    let state = State::get().await?;
+    let instance_dir = state
+        .directories
+        .instances_dir()
+        .join(&server.path)
+        .clone();
+    let _ = instance_dir;
+    let instance_path = crate::api::instance::get_full_path(instance_id).await?;
+    let server_dir = state.directories.servers_dir().join(&server.path);
+
+    let mut report = ProfileSyncReport {
+        mods_copied: 0,
+        mods_skipped_client_only: 0,
+        config_copied: false,
+        world_copied: false,
+    };
+
+    if copy_config {
+        let config_src = instance_path.join("config");
+        if config_src.is_dir() {
+            let config_dest = server_dir.join("config");
+            if config_dest.exists() {
+                tokio::fs::remove_dir_all(&config_dest)
+                    .await
+                    .map_err(|e| crate::util::io::IOError::with_path(e, &config_dest))?;
+            }
+            copy_dir_all(&config_src, &config_dest).await?;
+            report.config_copied = true;
+        }
+    }
+
+    if copy_mods {
+        let mods_src = instance_path.join("mods");
+        if mods_src.is_dir() {
+            let mods_dest = server_dir.join("mods");
+            if mods_dest.exists() {
+                tokio::fs::remove_dir_all(&mods_dest)
+                    .await
+                    .map_err(|e| crate::util::io::IOError::with_path(e, &mods_dest))?;
+            }
+            tokio::fs::create_dir_all(&mods_dest)
+                .await
+                .map_err(|e| crate::util::io::IOError::with_path(e, &mods_dest))?;
+
+            // Map mod files to their Modrinth projects to read the mod environment
+            let projects = crate::state::get_content_projects(
+                instance_id,
+                None,
+                None,
+                &state,
+            )
+            .await?;
+
+            let mut allowed_files: Vec<PathBuf> = Vec::new();
+            let mut project_ids: Vec<String> = Vec::new();
+            let mut file_projects: Vec<(PathBuf, String)> = Vec::new();
+
+            let mut entries = tokio::fs::read_dir(&mods_src)
+                .await
+                .map_err(|e| crate::util::io::IOError::with_path(e, &mods_src))?;
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|e| crate::util::io::IOError::with_path(e, &mods_src))?
+            {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                let file_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if !file_name.ends_with(".jar") || file_name.ends_with(".disabled") {
+                    continue;
+                }
+
+                // Look up this file's Modrinth project (if it came from Modrinth)
+                let project_id = projects
+                    .iter()
+                    .find(|entry| {
+                        entry.key().ends_with(&file_name)
+                            && entry
+                                .value()
+                                .metadata
+                                .as_ref()
+                                .map(|m| !m.project_id.is_empty())
+                                .unwrap_or(false)
+                    })
+                    .and_then(|entry| {
+                        entry.value().metadata.as_ref().map(|m| m.project_id.clone())
+                    });
+
+                if let Some(project_id) = project_id {
+                    project_ids.push(project_id.clone());
+                    file_projects.push((path, project_id));
+                } else {
+                    // Not tracked as a Modrinth project: include it (user-added
+                    // mods are assumed intentional) unless we can prove otherwise
+                    allowed_files.push(path);
+                }
+            }
+
+            // Ask Modrinth which projects are client-side only
+            let mut client_only: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            if !project_ids.is_empty() {
+                project_ids.dedup();
+                let url = format!("{}v2/projects", env!("MODRINTH_API_BASE_URL"));
+                match fetch::fetch_json::<Vec<ModrinthProject>>(
+                    reqwest::Method::POST,
+                    &url,
+                    None,
+                    Some(serde_json::json!(project_ids)),
+                    None,
+                    &state.api_semaphore,
+                    &state.pool,
+                )
+                .await
+                {
+                    Ok(projects) => {
+                        for project in projects {
+                            if project.server_side.as_deref() == Some("unsupported") {
+                                if let Some(id) = project.id {
+                                    client_only.insert(id);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Could not query Modrinth for mod environments: {e}; copying all mods"
+                        );
+                    }
+                }
+            }
+
+            for (path, project_id) in file_projects {
+                if client_only.contains(&project_id) {
+                    report.mods_skipped_client_only += 1;
+                } else {
+                    allowed_files.push(path);
+                }
+            }
+
+            for file in allowed_files {
+                let file_name = file
+                    .file_name()
+                    .map(|n| n.to_os_string())
+                    .unwrap_or_default();
+                let dest = mods_dest.join(&file_name);
+                tokio::fs::copy(&file, &dest)
+                    .await
+                    .map_err(|e| crate::util::io::IOError::with_path(e, &file))?;
+                report.mods_copied += 1;
+            }
+        }
+    }
+
+    Ok(report)
+}
+
+/// Recursively copies a directory, overwriting existing files
+pub fn copy_dir_all<'a>(
+    src: &'a Path,
+    dest: &'a Path,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::Result<()>> + Send + 'a>> {
+    Box::pin(async move {
+        if !src.is_dir() {
+            return Ok(());
+        }
+        tokio::fs::create_dir_all(dest)
+            .await
+            .map_err(|e| crate::util::io::IOError::with_path(e, dest))?;
+        let mut entries = tokio::fs::read_dir(src)
+            .await
+            .map_err(|e| crate::util::io::IOError::with_path(e, src))?;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| crate::util::io::IOError::with_path(e, src))?
+        {
+            let target = dest.join(entry.file_name());
+            let source = entry.path();
+            if source.is_dir() {
+                copy_dir_all(&source, &target).await?;
+            } else {
+                tokio::fs::copy(&source, &target)
+                    .await
+                    .map_err(|e| crate::util::io::IOError::with_path(e, &source))?;
+            }
+        }
+        Ok(())
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct ModrinthProject {
+    id: Option<String>,
+    #[serde(default)]
+    server_side: Option<String>,
 }

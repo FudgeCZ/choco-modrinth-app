@@ -94,6 +94,9 @@
 					"$APPCONFIG/caches/icons/*",
 					"$CONFIG/caches/icons/*",
 					"$APPDATA/profiles/*/saves/*/icon.png",
+						"$APPDATA/servers/**",
+						"$APPCONFIG/servers/**",
+						"$CONFIG/servers/**",
 					"$APPCONFIG/profiles/*/saves/*/icon.png",
 					"$CONFIG/profiles/*/saves/*/icon.png"
 				],
