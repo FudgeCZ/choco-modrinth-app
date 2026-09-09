@@ -153,6 +153,27 @@
 				}}</Button>
 
 				<IconButton
+					v-if="!instance.quarantined && instance.install_stage === 'installed'"
+					v-tooltip="
+						formatMessage(
+							instance.compressed ? messages.decompressInstance : messages.compressInstance,
+						)
+					"
+					size="xl"
+					:label="
+						formatMessage(
+							instance.compressed ? messages.decompressInstance : messages.compressInstance,
+						)
+					"
+					:disabled="playing"
+					:loading="compressing"
+					native-type="button"
+					@click="toggleCompress()"
+				>
+					<ArchiveIcon />
+				</IconButton>
+
+				<IconButton
 					v-tooltip="formatMessage(messages.instanceSettings)"
 					size="xl"
 					:label="formatMessage(messages.instanceSettings)"
@@ -216,7 +237,7 @@ import {
 	TagIcon,
 	useVIntl,
 } from '@modrinth/ui'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import { toError } from '@/helpers/errors'
 import { compress_instance, decompress_instance } from '@/helpers/instance'
@@ -445,7 +466,11 @@ const moreActions = computed<ButtonMenuOption[]>(() => {
 
 const { handleError } = injectNotificationManager()
 
+const compressing = ref(false)
+
 async function toggleCompress() {
+	if (compressing.value) return
+	compressing.value = true
 	try {
 		if (props.instance.compressed) {
 			await decompress_instance(props.instance.id)
@@ -454,6 +479,8 @@ async function toggleCompress() {
 		}
 	} catch (error) {
 		handleError(toError(error))
+	} finally {
+		compressing.value = false
 	}
 }
 </script>

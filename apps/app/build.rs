@@ -458,6 +458,7 @@ fn main() {
                     .commands(&[
                         "servers_list",
                         "servers_create",
+                        "servers_create_from_profile",
                         "servers_delete",
                         "servers_minecraft_versions",
                         "servers_loader_versions",
