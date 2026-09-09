@@ -1,25 +1,20 @@
 <script setup lang="ts">
-import {
-	CrownIcon,
-	HeartIcon,
-	SpinnerIcon,
-} from '@modrinth/assets'
-import {
-	Button,
-	injectNotificationManager,
-} from '@modrinth/ui'
+import { CrownIcon, HeartIcon, SpinnerIcon } from '@modrinth/assets'
+import { Button, injectNotificationManager } from '@modrinth/ui'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
+import { isDemoId } from '@/helpers/demo-data'
+import { demoPing, demoPlayersOverview } from '@/helpers/demo-runtime'
 import {
+	type ChocoServer,
 	get_player_details,
 	get_players_overview,
-	ping_server,
-	serverConsoleLines,
-	set_player_flag,
-	type ChocoServer,
 	type KnownPlayer,
+	ping_server,
 	type PlayerDetails,
+	serverConsoleLines,
 	type ServerPing,
+	set_player_flag,
 } from '@/helpers/servers'
 
 const props = defineProps<{
@@ -94,6 +89,11 @@ function initials(name: string): string {
 }
 
 async function loadOverview() {
+	if (isDemoId(props.server.id)) {
+		overview.value = demoPlayersOverview(props.server.id).players
+		loadingOverview.value = false
+		return
+	}
 	try {
 		overview.value = (await get_players_overview(props.server.id)).players
 	} catch (error) {
@@ -108,6 +108,10 @@ async function pollPing() {
 		ping.value = null
 		return
 	}
+	if (isDemoId(props.server.id)) {
+		ping.value = demoPing(props.server.id)
+		return
+	}
 	try {
 		ping.value = await ping_server(props.server.port)
 	} catch {
@@ -115,7 +119,13 @@ async function pollPing() {
 	}
 }
 
-async function applyFlag(player: string, flag: 'op' | 'whitelist' | 'ban' | 'kick', value: boolean) {
+async function applyFlag(
+	player: string,
+	flag: 'op' | 'whitelist' | 'ban' | 'kick',
+	value: boolean,
+) {
+	// Demo players are simulated; flag changes are inert
+	if (isDemoId(props.server.id)) return
 	busyPlayer.value = player
 	try {
 		await set_player_flag(props.server.id, player, flag, value)
@@ -138,6 +148,20 @@ async function toggleDetails(name: string) {
 		return
 	}
 	expandedPlayer.value = name
+	if (isDemoId(props.server.id)) {
+		// Demo players have no saved data on disk
+		details.value[name] = {
+			available: false,
+			name,
+			uuid: '',
+			hearts: null,
+			food: null,
+			game_mode: null,
+			bed: null,
+			inventory: [],
+		}
+		return
+	}
 	loadingDetails.value = name
 	try {
 		details.value[name] = await get_player_details(props.server.id, name)
@@ -181,15 +205,10 @@ onUnmounted(() => {
 					· {{ ping.players_online }}/{{ ping.players_max }} via ping
 				</template>
 			</p>
-			<p v-else class="m-0 text-sm text-secondary">
-				Start the server to see who is online.
-			</p>
+			<p v-else class="m-0 text-sm text-secondary">Start the server to see who is online.</p>
 		</div>
 
-		<p
-			v-if="loadingOverview && overview.length === 0"
-			class="m-0 text-sm text-secondary"
-		>
+		<p v-if="loadingOverview && overview.length === 0" class="m-0 text-sm text-secondary">
 			Loading players…
 		</p>
 
@@ -201,11 +220,7 @@ onUnmounted(() => {
 		</p>
 
 		<div v-else class="flex flex-col gap-5">
-			<section
-				v-for="section in sections"
-				:key="section.key"
-				class="flex flex-col gap-2"
-			>
+			<section v-for="section in sections" :key="section.key" class="flex flex-col gap-2">
 				<div class="flex items-center gap-2">
 					<h3 class="m-0 text-sm font-semibold uppercase tracking-wider text-secondary">
 						{{ section.label }}
@@ -215,10 +230,7 @@ onUnmounted(() => {
 					</span>
 				</div>
 
-				<p
-					v-if="section.rows.length === 0"
-					class="m-0 text-sm text-secondary"
-				>
+				<p v-if="section.rows.length === 0" class="m-0 text-sm text-secondary">
 					{{
 						section.key === 'online'
 							? 'No one is online right now.'
@@ -323,10 +335,7 @@ onUnmounted(() => {
 								>
 									Pardon
 								</Button>
-								<Button
-									size="sm"
-									@click="toggleDetails(row.name)"
-								>
+								<Button size="sm" @click="toggleDetails(row.name)">
 									{{ expandedPlayer === row.name ? 'Hide data' : 'Player data' }}
 								</Button>
 							</div>
@@ -344,10 +353,7 @@ onUnmounted(() => {
 								Loading player data…
 							</div>
 							<template v-else-if="details[row.name]">
-								<p
-									v-if="!details[row.name].available"
-									class="m-0 pt-3 text-sm text-secondary"
-								>
+								<p v-if="!details[row.name].available" class="m-0 pt-3 text-sm text-secondary">
 									No saved player data yet — the player must join the server at least once.
 								</p>
 								<div v-else class="grid grid-cols-1 gap-3 pt-3 md:grid-cols-3">
@@ -382,13 +388,10 @@ onUnmounted(() => {
 										</p>
 									</div>
 									<div class="rounded-xl bg-surface-3 p-3 md:col-span-3">
-										<p class="m-0 text-xs font-semibold text-secondary">
-											Bed / respawn point
-										</p>
+										<p class="m-0 text-xs font-semibold text-secondary">Bed / respawn point</p>
 										<p class="m-0 font-semibold text-contrast">
 											<template v-if="details[row.name].bed">
-												X {{ details[row.name].bed![0] }} · Y
-												{{ details[row.name].bed![1] }} · Z
+												X {{ details[row.name].bed![0] }} · Y {{ details[row.name].bed![1] }} · Z
 												{{ details[row.name].bed![2] }}
 											</template>
 											<template v-else>Not set</template>

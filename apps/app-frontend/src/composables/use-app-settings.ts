@@ -10,6 +10,7 @@ export const DEFAULT_FEATURE_FLAGS = {
 	always_show_app_controls: false,
 	show_sync_instances_update_modal: false,
 	skip_non_essential_warnings: false,
+	demo_view: false,
 	skip_unknown_pack_warning: false,
 	pride_fundraiser: true,
 	i18n_debug: false,

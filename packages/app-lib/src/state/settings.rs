@@ -92,6 +92,7 @@ pub enum FeatureFlag {
     FriendsPendingCollapsed,
     DismissedPhotosensitivityFilterWarning,
     LocalhostSignIn,
+    DemoView,
 }
 
 impl Settings {

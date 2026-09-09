@@ -15,6 +15,8 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { DEMO_SERVERS, isDemoId } from '@/helpers/demo-data'
+import { demoIsRunning, demoSetRunning, ensureDemoRuntime } from '@/helpers/demo-runtime'
 import {
 	accept_server_eula,
 	type ChocoServer,
@@ -41,6 +43,8 @@ const server = ref<ChocoServer | null>(null)
 const loading = ref(true)
 const running = ref(false)
 const restarting = ref(false)
+
+const isDemoServer = computed(() => isDemoId(server.value?.id))
 
 const activeTab = ref('dashboard')
 const tabItems = ['dashboard', 'content', 'properties', 'console', 'players'] as const
@@ -83,6 +87,13 @@ useBreadcrumb({
 async function load() {
 	loading.value = true
 	try {
+		if (isDemoId(serverId.value)) {
+			// Demo servers come from the demo data, not the backend
+			ensureDemoRuntime()
+			server.value = DEMO_SERVERS.find((s) => s.id === serverId.value) ?? null
+			running.value = server.value ? demoIsRunning(server.value.id) : false
+			return
+		}
 		const servers = await list_servers()
 		server.value = servers.find((s) => s.id === serverId.value) ?? null
 		running.value = server.value
@@ -99,8 +110,22 @@ onMounted(load)
 
 watch(serverId, load)
 
+// Demo stop/start updates the runtime state asynchronously (with a short
+// simulated shutdown); mirror it into the page's running flag.
+watch(
+	() => (isDemoId(serverId.value) ? demoIsRunning(serverId.value) : false),
+	(value) => {
+		if (isDemoId(serverId.value)) running.value = value
+	},
+)
+
 async function startServer() {
 	if (!server.value) return
+	if (isDemoId(server.value.id)) {
+		demoSetRunning(server.value.id, true)
+		running.value = true
+		return
+	}
 	try {
 		await run_server(server.value.id)
 		running.value = true
@@ -111,6 +136,10 @@ async function startServer() {
 
 async function stopServer() {
 	if (!server.value) return
+	if (isDemoId(server.value.id)) {
+		demoSetRunning(server.value.id, false)
+		return
+	}
 	try {
 		await stop_server(server.value.id)
 		running.value = false
@@ -121,6 +150,16 @@ async function stopServer() {
 
 async function restartServer() {
 	if (!server.value || restarting.value) return
+	if (isDemoId(server.value.id)) {
+		const id = server.value.id
+		restarting.value = true
+		demoSetRunning(id, false)
+		await new Promise((resolve) => setTimeout(resolve, 1600))
+		demoSetRunning(id, true)
+		running.value = true
+		restarting.value = false
+		return
+	}
 	restarting.value = true
 	try {
 		await stop_server(server.value.id)
@@ -141,6 +180,7 @@ async function restartServer() {
 
 async function acceptEula() {
 	if (!server.value) return
+	if (isDemoId(server.value.id)) return
 	try {
 		await accept_server_eula(server.value.id)
 		server.value = { ...server.value, eula_accepted: true }
@@ -151,6 +191,7 @@ async function acceptEula() {
 
 async function openFolder() {
 	if (!server.value) return
+	if (isDemoId(server.value.id)) return
 	const { open_server_folder } = await import('@/helpers/servers')
 	await open_server_folder(server.value.id).catch(handleError)
 }
@@ -158,6 +199,9 @@ async function openFolder() {
 const settingsModal = useTemplateRef('settingsModal')
 function openSettings() {
 	if (!server.value) return
+	// The shared settings modal would try to persist to the backend; keep it
+	// inert for demo servers.
+	if (isDemoId(server.value.id)) return
 	settingsModal.value?.show(server.value)
 }
 
@@ -166,7 +210,7 @@ function onSettingsSaved(updated: ChocoServer) {
 }
 
 const loaderLabel = computed(() =>
-	server.value ? loaderNames[server.value.loader] ?? server.value.loader : '',
+	server.value ? (loaderNames[server.value.loader] ?? server.value.loader) : '',
 )
 const loaderNames: Record<string, string> = {
 	vanilla: 'Vanilla',
@@ -195,9 +239,7 @@ function serverIconUrl(value: ChocoServer): string | null {
 			<div class="flex flex-col items-center gap-3 py-16">
 				<ArchiveIcon class="size-12 text-secondary" />
 				<p class="m-0 text-lg font-semibold text-contrast">Server not found</p>
-				<Button color="brand" @click="router.push('/local-servers')">
-					Back to servers
-				</Button>
+				<Button color="brand" @click="router.push('/local-servers')"> Back to servers </Button>
 			</div>
 		</template>
 
@@ -210,10 +252,7 @@ function serverIconUrl(value: ChocoServer): string | null {
 						:alt="server.name"
 						class="size-16 rounded-2xl object-cover"
 					/>
-					<div
-						v-else
-						class="flex size-16 items-center justify-center rounded-2xl bg-surface-3"
-					>
+					<div v-else class="flex size-16 items-center justify-center rounded-2xl bg-surface-3">
 						<ArchiveIcon class="size-8 text-secondary" />
 					</div>
 					<div class="flex flex-col gap-1">
@@ -222,16 +261,10 @@ function serverIconUrl(value: ChocoServer): string | null {
 						</h1>
 						<p class="m-0 flex items-center gap-2 text-sm text-secondary">
 							{{ loaderLabel }} {{ server.game_version }}
-							<template v-if="server.loader_version">
-								· {{ server.loader_version }}</template
-							>
+							<template v-if="server.loader_version"> · {{ server.loader_version }}</template>
 							<span
 								class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
-								:class="
-									running
-										? 'bg-highlight-green text-green'
-										: 'bg-surface-4 text-secondary'
-								"
+								:class="running ? 'bg-highlight-green text-green' : 'bg-surface-4 text-secondary'"
 							>
 								<span
 									class="size-1.5 rounded-full"
@@ -244,20 +277,10 @@ function serverIconUrl(value: ChocoServer): string | null {
 				</div>
 
 				<div class="flex flex-wrap items-center gap-2">
-					<Button
-						v-if="!server.eula_accepted"
-						size="lg"
-						color="brand"
-						@click="acceptEula"
-					>
+					<Button v-if="!server.eula_accepted" size="lg" color="brand" @click="acceptEula">
 						Accept EULA
 					</Button>
-					<Button
-						v-if="running"
-						size="lg"
-						color="red"
-						@click="stopServer"
-					>
+					<Button v-if="running" size="lg" color="red" @click="stopServer">
 						<StopCircleIcon aria-hidden="true" />
 						Stop
 					</Button>
@@ -272,27 +295,17 @@ function serverIconUrl(value: ChocoServer): string | null {
 						<PlayIcon aria-hidden="true" />
 						Start
 					</Button>
-					<Button
-						v-if="running"
-						size="lg"
-						:disabled="restarting"
-						@click="restartServer"
-					>
+					<Button v-if="running" size="lg" :disabled="restarting" @click="restartServer">
 						<span
 							v-if="restarting"
 							class="size-4 animate-spin rounded-full border-2 border-solid border-brand border-t-transparent"
 						/>
 						{{ restarting ? 'Restarting…' : 'Restart' }}
 					</Button>
-					<Button icon-only size="lg" @click="openFolder">
+					<Button v-if="!isDemoServer" icon-only size="lg" @click="openFolder">
 						<FolderOpenIcon aria-hidden="true" />
 					</Button>
-					<Button
-						v-tooltip="'More settings'"
-						icon-only
-						size="lg"
-						@click="openSettings"
-					>
+					<Button v-tooltip="'More settings'" icon-only size="lg" @click="openSettings">
 						<WrenchIcon aria-hidden="true" />
 					</Button>
 				</div>
@@ -313,24 +326,10 @@ function serverIconUrl(value: ChocoServer): string | null {
 				:running="running"
 				@open-console="activeTab = 'console'"
 			/>
-			<ContentTab
-				v-else-if="activeTab === 'content'"
-				:server="server"
-			/>
-			<PropertiesTab
-				v-else-if="activeTab === 'properties'"
-				:server="server"
-			/>
-			<ConsoleTab
-				v-else-if="activeTab === 'console'"
-				:server="server"
-				:running="running"
-			/>
-			<PlayersTab
-				v-else-if="activeTab === 'players'"
-				:server="server"
-				:running="running"
-			/>
+			<ContentTab v-else-if="activeTab === 'content'" :server="server" />
+			<PropertiesTab v-else-if="activeTab === 'properties'" :server="server" />
+			<ConsoleTab v-else-if="activeTab === 'console'" :server="server" :running="running" />
+			<PlayersTab v-else-if="activeTab === 'players'" :server="server" :running="running" />
 		</template>
 
 		<SettingsModal

@@ -27,6 +27,9 @@ import { computed, defineComponent, h, onMounted, ref, useTemplateRef, watch } f
 import { useRouter } from 'vue-router'
 
 import { useAppEvent } from '@/composables/use-app-event'
+import { useAppSettings } from '@/composables/use-app-settings'
+import { DEMO_SERVERS, isDemoId } from '@/helpers/demo-data'
+import { demoIsRunning, demoToggleRunning, ensureDemoRuntime } from '@/helpers/demo-runtime'
 import { getInstanceIconUrl, list as list_instances } from '@/helpers/instance'
 import {
 	accept_server_eula,
@@ -46,13 +49,20 @@ import {
 	stop_server,
 	sync_profile_content,
 } from '@/helpers/servers'
-import { type LoadingBar,progress_bars_list } from '@/helpers/state'
+import { type LoadingBar, progress_bars_list } from '@/helpers/state'
 import type { GameInstance } from '@/helpers/types'
 import { get_instance_worlds } from '@/helpers/worlds'
 
 const { handleError, pushNotification } = injectNotificationManager()
 
-const servers = ref<ChocoServer[]>([])
+const appSettings = useAppSettings()
+const demoEnabled = computed(() => appSettings.getFeatureFlag('demo_view'))
+
+const realServers = ref<ChocoServer[]>([])
+// Demo servers are prepended to the real list when the demo flag is on
+const servers = computed<ChocoServer[]>(() =>
+	demoEnabled.value ? [...DEMO_SERVERS, ...realServers.value] : realServers.value,
+)
 const loading = ref(true)
 const highlightId = ref<string | null>(null)
 
@@ -148,8 +158,12 @@ const showAllVersions = ref(false)
 const loaderVersionOptions = ref<ServerLoaderVersion[]>([])
 const loadingLoaderVersions = ref(false)
 
-const selectedProfile = computed(() =>
-	profiles.value.find((p) => p.id === selectedProfileId.value),
+const selectedProfile = computed(() => profiles.value.find((p) => p.id === selectedProfileId.value))
+
+// Demo view: demo servers are not profiles and must not be selectable when
+// creating a server from a profile.
+const selectableProfiles = computed(() =>
+	demoEnabled.value ? profiles.value.filter((p) => !isDemoId(p.id)) : profiles.value,
 )
 
 // Combobox options take an icon component rather than an image URL, so wrap
@@ -170,7 +184,7 @@ function profileIconComponent(iconPath: string | null | undefined) {
 }
 
 const profileOptions = computed(() =>
-	profiles.value.map((p) => ({
+	selectableProfiles.value.map((p) => ({
 		value: p.id,
 		label: p.name,
 		subLabel: `${p.loader} ${p.game_version}`,
@@ -192,14 +206,11 @@ const canCreateScratch = computed(
 )
 
 const canCreateFromProfile = computed(
-	() =>
-		!!selectedProfileId.value &&
-		acceptEula.value &&
-		!creating.value &&
-		!!selectedProfile.value,
+	() => !!selectedProfileId.value && acceptEula.value && !creating.value && !!selectedProfile.value,
 )
 
 onMounted(async () => {
+	ensureDemoRuntime()
 	await init_server_listeners()
 	await refresh()
 	try {
@@ -221,7 +232,7 @@ onMounted(async () => {
 async function refresh() {
 	loading.value = true
 	try {
-		servers.value = await list_servers()
+		realServers.value = await list_servers()
 	} catch (error) {
 		handleError(error)
 	} finally {
@@ -230,7 +241,8 @@ async function refresh() {
 }
 
 async function refreshRunningStates() {
-	for (const server of servers.value) {
+	for (const server of realServers.value) {
+		if (isDemoId(server.id)) continue
 		try {
 			runningServers.value[server.id] = await is_server_running(server.id)
 		} catch {
@@ -245,10 +257,7 @@ watch([gameVersion, selectedLoader], async () => {
 	if (selectedLoader.value === 'vanilla' || !gameVersion.value) return
 	loadingLoaderVersions.value = true
 	try {
-		loaderVersionOptions.value = await loader_versions(
-			selectedLoader.value,
-			gameVersion.value,
-		)
+		loaderVersionOptions.value = await loader_versions(selectedLoader.value, gameVersion.value)
 		if (loaderVersionOptions.value.length > 0) {
 			loaderVersion.value = loaderVersionOptions.value[0].id
 		}
@@ -266,9 +275,7 @@ watch(selectedProfileId, async () => {
 	loadingSaves.value = true
 	try {
 		const worlds = await get_instance_worlds(selectedProfileId.value)
-		profileSaves.value = worlds
-			.filter((w) => w.type === 'singleplayer')
-			.map((w) => w.name)
+		profileSaves.value = worlds.filter((w) => w.type === 'singleplayer').map((w) => w.name)
 	} catch {
 		profileSaves.value = []
 	} finally {
@@ -374,8 +381,16 @@ async function syncServer(server: ChocoServer) {
 	}
 }
 
+function isEntryRunning(server: ChocoServer): boolean {
+	return isDemoId(server.id) ? demoIsRunning(server.id) : (runningServers.value[server.id] ?? false)
+}
+
 async function toggleRun(server: ChocoServer) {
 	try {
+		if (isDemoId(server.id)) {
+			demoToggleRunning(server.id)
+			return
+		}
 		if (runningServers.value[server.id]) {
 			await stop_server(server.id)
 		} else {
@@ -406,6 +421,18 @@ function openDashboardPage(server: ChocoServer) {
 }
 
 function serverMenuOptions(server: ChocoServer): ButtonMenuOption[] {
+	// Demo servers only offer the dashboard — there is no real folder or
+	// profile link behind them.
+	if (isDemoId(server.id)) {
+		return [
+			{
+				id: 'open-dashboard',
+				label: 'Open dashboard',
+				icon: GaugeIcon,
+				action: () => openDashboardPage(server),
+			},
+		]
+	}
 	const options: ButtonMenuOption[] = [
 		{
 			id: 'open-folder',
@@ -455,9 +482,7 @@ async function acceptEulaFor(server: ChocoServer) {
 		<div class="flex items-center justify-between">
 			<div>
 				<h1 class="m-0 text-2xl font-bold text-contrast">Servers</h1>
-				<p class="m-0 text-secondary">
-					Create and run your own local Minecraft servers.
-				</p>
+				<p class="m-0 text-secondary">Create and run your own local Minecraft servers.</p>
 			</div>
 			<Button color="brand" class="!mt-0" @click="createModal?.show()">
 				<PlusIcon aria-hidden="true" />
@@ -476,8 +501,8 @@ async function acceptEulaFor(server: ChocoServer) {
 			<ArchiveIcon class="size-12 text-secondary" />
 			<p class="m-0 text-lg font-semibold text-contrast">No servers yet</p>
 			<p class="m-0 max-w-md text-center text-secondary">
-				Create a server and ChocoModrinth will automatically download the server
-				jar, set up the EULA, server.properties and start scripts for you.
+				Create a server and ChocoModrinth will automatically download the server jar, set up the
+				EULA, server.properties and start scripts for you.
 			</p>
 			<Button color="brand" @click="createModal?.show()">
 				<PlusIcon aria-hidden="true" />
@@ -495,9 +520,7 @@ async function acceptEulaFor(server: ChocoServer) {
 				:key="entry.key"
 				class="flex flex-col overflow-hidden rounded-2xl border-0 border-solid border-divider bg-surface-2"
 			>
-				<div
-					class="flex aspect-square w-full items-center justify-center bg-surface-3"
-				>
+				<div class="flex aspect-square w-full items-center justify-center bg-surface-3">
 					<SpinnerIcon class="size-10 animate-spin text-brand" />
 				</div>
 				<div class="flex flex-col gap-1 p-2.5">
@@ -534,9 +557,7 @@ async function acceptEulaFor(server: ChocoServer) {
 				@click="openDashboardPage(server)"
 			>
 				<div class="relative">
-					<div
-						class="flex aspect-square w-full items-center justify-center bg-surface-4"
-					>
+					<div class="flex aspect-square w-full items-center justify-center bg-surface-4">
 						<img
 							v-if="server.icon_file"
 							:src="serverIconUrl(server)"
@@ -546,7 +567,13 @@ async function acceptEulaFor(server: ChocoServer) {
 						<ArchiveIcon v-else class="size-12 text-secondary" />
 					</div>
 					<div
-						v-if="runningServers[server.id]"
+						v-if="isDemoId(server.id)"
+						class="absolute bottom-1.5 left-1.5 rounded-full bg-brand px-2 py-0.5 text-xs font-semibold text-brand-inverted"
+					>
+						Demo
+					</div>
+					<div
+						v-if="isEntryRunning(server)"
 						class="absolute top-1.5 left-1.5 flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-xs font-semibold text-green"
 					>
 						<span class="size-1.5 rounded-full bg-green" />
@@ -572,15 +599,11 @@ async function acceptEulaFor(server: ChocoServer) {
 					</p>
 				</div>
 				<div class="mt-auto p-2 pt-0" @click.stop>
-					<Button
-						v-if="!server.eula_accepted"
-						class="w-full py-2"
-						@click="acceptEulaFor(server)"
-					>
+					<Button v-if="!server.eula_accepted" class="w-full py-2" @click="acceptEulaFor(server)">
 						Accept EULA
 					</Button>
 					<Button
-						v-else-if="runningServers[server.id]"
+						v-else-if="isEntryRunning(server)"
 						color="red"
 						class="w-full py-2"
 						@click="toggleRun(server)"
@@ -588,12 +611,7 @@ async function acceptEulaFor(server: ChocoServer) {
 						<StopCircleIcon aria-hidden="true" />
 						Stop
 					</Button>
-					<Button
-						v-else
-						color="brand"
-						class="w-full py-2"
-						@click="toggleRun(server)"
-					>
+					<Button v-else color="brand" class="w-full py-2" @click="toggleRun(server)">
 						<PlayIcon aria-hidden="true" />
 						Start
 					</Button>
@@ -606,7 +624,9 @@ async function acceptEulaFor(server: ChocoServer) {
 				<Chips
 					v-model="creationTab"
 					:items="tabItems"
-					:format-label="(item: 'scratch' | 'profile') => item === 'scratch' ? 'From scratch' : 'From profile'"
+					:format-label="
+						(item: 'scratch' | 'profile') => (item === 'scratch' ? 'From scratch' : 'From profile')
+					"
 				/>
 
 				<template v-if="creationTab === 'scratch'">
@@ -658,12 +678,20 @@ async function acceptEulaFor(server: ChocoServer) {
 						</span>
 						<Combobox
 							v-model="loaderVersion"
-							:options="loaderVersionOptions.map((v) => ({ value: v.id, label: v.recommended ? `${v.id} (recommended)` : v.id }))"
+							:options="
+								loaderVersionOptions.map((v) => ({
+									value: v.id,
+									label: v.recommended ? `${v.id} (recommended)` : v.id,
+								}))
+							"
 							:display-value="loaderVersion || 'Select version'"
 							:disabled="loadingLoaderVersions || loaderVersionOptions.length === 0"
 							:searchable="loaderVersionOptions.length > 8"
 						/>
-						<span v-if="!loadingLoaderVersions && loaderVersionOptions.length === 0" class="text-xs text-secondary">
+						<span
+							v-if="!loadingLoaderVersions && loaderVersionOptions.length === 0"
+							class="text-xs text-secondary"
+						>
 							Not available for this Minecraft version.
 						</span>
 					</div>
@@ -676,14 +704,13 @@ async function acceptEulaFor(server: ChocoServer) {
 							v-model="selectedProfileId"
 							:options="profileOptions"
 							:display-value="selectedProfile?.name ?? 'Select a profile'"
-							:searchable="profiles.length > 8"
+							:searchable="selectableProfiles.length > 8"
 							placeholder="Select a profile"
 							show-icon-in-selected
 						/>
 						<p v-if="selectedProfile" class="m-0 mt-1 text-xs text-secondary">
 							Server inherits {{ loaderLabels[selectedProfile.loader] }}
-							{{ selectedProfile.game_version }} and is named
-							"{{ selectedProfile.name }} Server".
+							{{ selectedProfile.game_version }} and is named "{{ selectedProfile.name }} Server".
 						</p>
 					</div>
 
@@ -692,13 +719,15 @@ async function acceptEulaFor(server: ChocoServer) {
 						<Combobox
 							v-model="selectedSave"
 							:options="profileSaves.map((s) => ({ value: s, label: s }))"
-							:display-value="selectedSave ?? (loadingSaves ? 'Loading saves...' : 'No save (empty world)')"
+							:display-value="
+								selectedSave ?? (loadingSaves ? 'Loading saves...' : 'No save (empty world)')
+							"
 							:disabled="loadingSaves || profileSaves.length === 0"
 							:clearable="true"
 						/>
 						<p class="m-0 mt-1 text-xs text-secondary">
-							Optional: pick a singleplayer save to use as the server world. The
-							save is copied, not moved.
+							Optional: pick a singleplayer save to use as the server world. The save is copied, not
+							moved.
 						</p>
 					</div>
 
@@ -708,8 +737,8 @@ async function acceptEulaFor(server: ChocoServer) {
 							<span class="text-contrast">Copy mods</span>
 						</div>
 						<p class="m-0 text-xs text-secondary">
-							Client-only mods (marked unsupported on the server by Modrinth) are
-							excluded automatically.
+							Client-only mods (marked unsupported on the server by Modrinth) are excluded
+							automatically.
 						</p>
 						<div class="flex items-center gap-2">
 							<Toggle v-model="copyConfig" />
@@ -808,7 +837,5 @@ async function acceptEulaFor(server: ChocoServer) {
 				</Button>
 			</div>
 		</NewModal>
-
-
 	</div>
 </template>

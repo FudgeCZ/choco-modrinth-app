@@ -3,13 +3,15 @@ import { ChevronRightIcon, SpinnerIcon } from '@modrinth/assets'
 import { Button, injectNotificationManager } from '@modrinth/ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
+import { isDemoId } from '@/helpers/demo-data'
+import { demoPing, demoSay } from '@/helpers/demo-runtime'
 import {
+	type ChocoServer,
 	ping_server,
 	send_server_command,
 	serverConsoleLines,
-	serverStats,
-	type ChocoServer,
 	type ServerPing,
+	serverStats,
 } from '@/helpers/servers'
 
 import Sparkline from './Sparkline.vue'
@@ -70,9 +72,7 @@ const chatLines = computed(() =>
 		.slice(-30),
 )
 
-const consolePreview = computed(() =>
-	(serverConsoleLines.value[props.server.id] ?? []).slice(-10),
-)
+const consolePreview = computed(() => (serverConsoleLines.value[props.server.id] ?? []).slice(-10))
 
 const previewElement = ref<HTMLElement | null>(null)
 
@@ -93,6 +93,10 @@ async function pollPing() {
 		ping.value = null
 		return
 	}
+	if (isDemoId(props.server.id)) {
+		ping.value = demoPing(props.server.id)
+		return
+	}
 	pinging.value = true
 	try {
 		ping.value = await ping_server(props.server.port)
@@ -106,6 +110,11 @@ async function pollPing() {
 function sendChat() {
 	const message = chatMessage.value.trim()
 	if (!message || !props.running) return
+	if (isDemoId(props.server.id)) {
+		demoSay(props.server.id, message)
+		chatMessage.value = ''
+		return
+	}
 	send_server_command(props.server.id, `/say ${message}`).catch(handleError)
 	chatMessage.value = ''
 }
@@ -122,7 +131,9 @@ onUnmounted(() => {
 
 <template>
 	<div class="grid grid-cols-1 gap-4 xl:grid-cols-[24rem_1fr]">
-		<div class="flex h-full min-h-[calc(100vh-24rem)] flex-col gap-4 rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4">
+		<div
+			class="flex h-full min-h-[calc(100vh-24rem)] flex-col gap-4 rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4"
+		>
 			<h2 class="m-0 text-lg font-semibold text-contrast">Stats</h2>
 			<template v-if="running">
 				<div>
@@ -145,13 +156,9 @@ onUnmounted(() => {
 						</span>
 					</div>
 					<Sparkline :values="stats.cpu" />
-					<p class="m-0 text-xs text-secondary">
-						of one core, averaged over the last second
-					</p>
+					<p class="m-0 text-xs text-secondary">of one core, averaged over the last second</p>
 				</div>
-				<p v-if="!stats.latest" class="m-0 text-xs text-secondary">
-					Waiting for stats…
-				</p>
+				<p v-if="!stats.latest" class="m-0 text-xs text-secondary">Waiting for stats…</p>
 			</template>
 			<p v-else class="m-0 text-sm text-secondary">
 				Start the server to see live RAM and CPU usage.
@@ -159,7 +166,9 @@ onUnmounted(() => {
 		</div>
 
 		<div class="flex min-h-[calc(100vh-24rem)] flex-col gap-4">
-			<div class="flex min-h-[16rem] flex-1 flex-col rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4">
+			<div
+				class="flex min-h-[16rem] flex-1 flex-col rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4"
+			>
 				<h2 class="m-0 text-lg font-semibold text-contrast">Players &amp; chat</h2>
 				<div v-if="running" class="mb-2 flex flex-wrap items-center gap-2 text-sm text-secondary">
 					<span>
@@ -186,10 +195,10 @@ onUnmounted(() => {
 					Start the server to see players and chat.
 				</p>
 				<template v-else>
-					<div class="mb-2 flex min-h-[4rem] flex-1 flex-col gap-0.5 overflow-y-auto rounded-xl bg-surface-3 p-2 text-xs text-secondary">
-						<p v-if="chatLines.length === 0" class="m-0">
-							Chat messages appear here.
-						</p>
+					<div
+						class="mb-2 flex min-h-[4rem] flex-1 flex-col gap-0.5 overflow-y-auto rounded-xl bg-surface-3 p-2 text-xs text-secondary"
+					>
+						<p v-if="chatLines.length === 0" class="m-0">Chat messages appear here.</p>
 						<p v-for="(line, index) in chatLines" :key="index" class="m-0 break-words">
 							{{ line.speaker }}: {{ line.message }}
 						</p>
@@ -206,18 +215,24 @@ onUnmounted(() => {
 				</template>
 			</div>
 
-			<div class="flex h-64 flex-col rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4">
+			<div
+				class="flex h-64 flex-col rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4"
+			>
 				<div class="flex items-center justify-between gap-2">
 					<h2 class="m-0 text-lg font-semibold text-contrast">Console</h2>
 					<Button @click="emit('open-console')">
 						Open console
-						<ArrowRightIcon aria-hidden="true" />
+						<ChevronRightIcon aria-hidden="true" />
 					</Button>
 				</div>
 				<pre
 					ref="previewElement"
 					class="mt-2 min-h-0 flex-1 overflow-y-auto rounded-xl bg-surface-3 p-3 text-xs whitespace-pre-wrap text-secondary"
-					>{{ consolePreview.length > 0 ? consolePreview.join('\n') : 'Console output appears here while the server is running.' }}</pre
+					>{{
+						consolePreview.length > 0
+							? consolePreview.join('\n')
+							: 'Console output appears here while the server is running.'
+					}}</pre
 				>
 			</div>
 		</div>

@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import { injectNotificationManager } from '@modrinth/ui'
-import { computed, onMounted, ref } from 'vue'
+import { Button, injectNotificationManager } from '@modrinth/ui'
+import { onMounted, ref } from 'vue'
 
-import {
-	get_server_properties,
-	set_server_properties,
-	type ChocoServer,
-} from '@/helpers/servers'
+import { DEMO_PROPERTIES, isDemoId } from '@/helpers/demo-data'
+import { type ChocoServer, get_server_properties, set_server_properties } from '@/helpers/servers'
 
 const props = defineProps<{
 	server: ChocoServer
@@ -76,6 +73,13 @@ function toggleValue(key: string) {
 }
 
 onMounted(async () => {
+	if (isDemoId(props_serverId())) {
+		// Demo servers serve their properties from the demo data; copies so
+		// edits stay local (saving is a no-op).
+		entries.value = (DEMO_PROPERTIES[props_serverId()] ?? []).map((entry) => [entry[0], entry[1]])
+		loading.value = false
+		return
+	}
 	try {
 		let props = await get_server_properties(props_serverId())
 		if (props.length === 0) {
@@ -111,6 +115,11 @@ function props_serverId(): string {
 }
 
 async function save() {
+	// Demo properties are not persisted anywhere; just show "Saved."
+	if (isDemoId(props_serverId())) {
+		saved.value = true
+		return
+	}
 	saving.value = true
 	try {
 		await set_server_properties(props.server.id, entries.value)
@@ -133,13 +142,7 @@ async function save() {
 					<span v-if="saved" class="ml-1 font-semibold text-green">Saved.</span>
 				</p>
 			</div>
-			<Button
-				color="brand"
-				size="lg"
-				:loading="saving"
-				:disabled="loading"
-				@click="save"
-			>
+			<Button color="brand" size="lg" :loading="saving" :disabled="loading" @click="save">
 				Save properties
 			</Button>
 		</div>
@@ -182,13 +185,9 @@ async function save() {
 					:type="field.type === 'number' ? 'number' : 'text'"
 					:value="valueOf(field.key)"
 					class="w-full rounded-xl border-0 border-solid border-divider bg-surface-3 px-3 py-2 text-contrast"
-					@input="
-						setValue(field.key, ($event.target as HTMLInputElement).value)
-					"
+					@input="setValue(field.key, ($event.target as HTMLInputElement).value)"
 				/>
 			</div>
 		</div>
-
-
 	</div>
 </template>

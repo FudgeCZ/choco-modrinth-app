@@ -1,19 +1,15 @@
 <script setup lang="ts">
 import { SpinnerIcon, TrashIcon } from '@modrinth/assets'
-import {
-	Button,
-	ConfirmModal,
-	injectNotificationManager,
-	Toggle,
-} from '@modrinth/ui'
-import { onMounted, useTemplateRef, ref } from 'vue'
+import { Button, ConfirmModal, injectNotificationManager, Toggle } from '@modrinth/ui'
+import { onMounted, ref, useTemplateRef } from 'vue'
 
+import { DEMO_CONTENT, isDemoId } from '@/helpers/demo-data'
 import {
+	type ChocoServer,
 	delete_server_content,
 	list_server_content,
-	set_server_content_enabled,
-	type ChocoServer,
 	type ServerContentItem,
+	set_server_content_enabled,
 } from '@/helpers/servers'
 
 const props = defineProps<{
@@ -30,7 +26,12 @@ const deleteModal = useTemplateRef('deleteModal')
 async function load() {
 	loading.value = true
 	try {
-		items.value = await list_server_content(props.server.id)
+		if (isDemoId(props.server.id)) {
+			// Copy so demo enable/disable toggles can mutate local state only
+			items.value = (DEMO_CONTENT[props.server.id] ?? []).map((item) => ({ ...item }))
+		} else {
+			items.value = await list_server_content(props.server.id)
+		}
 	} catch (error) {
 		handleError(error)
 	} finally {
@@ -45,12 +46,12 @@ function displayName(item: ServerContentItem): string {
 }
 
 async function toggleEnabled(item: ServerContentItem) {
+	if (isDemoId(props.server.id)) {
+		item.enabled = !item.enabled
+		return
+	}
 	try {
-		await set_server_content_enabled(
-			props.server.id,
-			item.file_name,
-			!item.enabled,
-		)
+		await set_server_content_enabled(props.server.id, item.file_name, !item.enabled)
 		await load()
 	} catch (error) {
 		handleError(error)
@@ -64,6 +65,11 @@ function askDelete(item: ServerContentItem) {
 
 async function doDelete() {
 	if (!deleteTarget.value) return
+	if (isDemoId(props.server.id)) {
+		items.value = items.value.filter((item) => item.file_name !== deleteTarget.value?.file_name)
+		deleteTarget.value = null
+		return
+	}
 	try {
 		await delete_server_content(props.server.id, deleteTarget.value.file_name)
 		await load()
@@ -83,18 +89,13 @@ function formatSize(bytes: number): string {
 <template>
 	<div class="flex flex-col gap-3">
 		<div class="flex items-center justify-between">
-			<h2 class="m-0 text-lg font-semibold text-contrast">
-				Installed content
-			</h2>
+			<h2 class="m-0 text-lg font-semibold text-contrast">Installed content</h2>
 			<p class="m-0 text-xs text-secondary">
 				Enable/disable takes effect after a server restart. Restart to apply.
 			</p>
 		</div>
 
-		<div
-			v-if="loading"
-			class="flex justify-center py-12 text-secondary"
-		>
+		<div v-if="loading" class="flex justify-center py-12 text-secondary">
 			<SpinnerIcon class="size-8 animate-spin" />
 		</div>
 
@@ -102,8 +103,8 @@ function formatSize(bytes: number): string {
 			v-else-if="items.length === 0"
 			class="m-0 rounded-2xl bg-surface-2 p-6 text-center text-secondary"
 		>
-			No mods or plugins installed yet. Drop .jar files into the server's
-			content folder (use the folder button in the header).
+			No mods or plugins installed yet. Drop .jar files into the server's content folder (use the
+			folder button in the header).
 		</p>
 
 		<div v-else class="flex flex-col gap-2">
@@ -127,10 +128,7 @@ function formatSize(bytes: number): string {
 				<div class="min-w-0 flex-1">
 					<p class="m-0 truncate font-semibold text-contrast">
 						{{ displayName(item) }}
-						<span
-							v-if="item.version"
-							class="ml-1 text-xs font-normal text-secondary"
-						>
+						<span v-if="item.version" class="ml-1 text-xs font-normal text-secondary">
 							{{ item.version }}
 						</span>
 					</p>
@@ -142,10 +140,7 @@ function formatSize(bytes: number): string {
 					<span class="text-xs text-secondary">
 						{{ item.enabled ? 'Enabled' : 'Disabled' }}
 					</span>
-					<Toggle
-						:model-value="item.enabled"
-						@update:model-value="() => toggleEnabled(item)"
-					/>
+					<Toggle :model-value="item.enabled" @update:model-value="() => toggleEnabled(item)" />
 					<Button icon-only color="red" @click="askDelete(item)">
 						<TrashIcon aria-hidden="true" />
 					</Button>
