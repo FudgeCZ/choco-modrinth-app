@@ -25,6 +25,31 @@ pub(crate) async fn sync_instance_content_files(
     state: &State,
 ) -> crate::Result<Vec<InstanceFile>> {
     let _content_lock = state.lock_instance_content(&instance.id).await;
+
+    // While an instance is stored compressed its files live inside the
+    // archive, so a disk scan would mark every row missing and empty the
+    // Content page. The content rows still describe the archive contents;
+    // report them unchanged until the instance is extracted again.
+    if instance.compressed {
+        let archive_path = state
+            .directories
+            .instances_dir()
+            .join(&instance.path)
+            .join(crate::api::instance::compress::ARCHIVE_FILE_NAME);
+        if archive_path.is_file() {
+            let files =
+                sqlite::content_rows::get_instance_files(&instance.id, &state.pool)
+                    .await?;
+            return Ok(files
+                .into_iter()
+                .map(|mut file| {
+                    file.missing = false;
+                    file
+                })
+                .collect());
+        }
+    }
+
     let scanned = filesystem::scan_content_files(
         &state.directories.instances_dir(),
         &instance.path,

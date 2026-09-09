@@ -1152,10 +1152,19 @@ pub async fn instance_check_installed(
     }
 }
 
+/// Content edits write into the instance folder, so a compressed instance
+/// must be extracted first. The `compressed` flag stays set, so the instance
+/// is archived again after the next game session.
+async fn ensure_extracted_for_content_edit(instance_id: &str) -> Result<()> {
+    theseus::instance::compress::ensure_extracted_for_launch(instance_id).await?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn instance_update_all(
     instance_id: &str,
 ) -> Result<HashMap<String, String>> {
+    ensure_extracted_for_content_edit(instance_id).await?;
     Ok(theseus::instance::update_all_projects(instance_id).await?)
 }
 
@@ -1164,6 +1173,7 @@ pub async fn instance_update_project(
     instance_id: &str,
     project_path: &str,
 ) -> Result<String> {
+    ensure_extracted_for_content_edit(instance_id).await?;
     Ok(
         theseus::instance::update_project(instance_id, project_path, None)
             .await?,
@@ -1177,6 +1187,7 @@ pub async fn instance_add_project_from_version(
     reason: DownloadReason,
     dependent_on_version_id: Option<String>,
 ) -> Result<String> {
+    ensure_extracted_for_content_edit(instance_id).await?;
     Ok(theseus::instance::add_project_from_version(
         instance_id,
         version_id,
@@ -1191,6 +1202,7 @@ pub async fn instance_install_project_with_dependencies(
     instance_id: &str,
     request: InstallProjectWithDependenciesRequest,
 ) -> Result<ResolveContentPlan> {
+    ensure_extracted_for_content_edit(instance_id).await?;
     Ok(theseus::instance::install_project_with_dependencies(
         instance_id,
         request,
@@ -1204,6 +1216,7 @@ pub async fn instance_switch_project_version_with_dependencies(
     project_path: &str,
     version_id: &str,
 ) -> Result<String> {
+    ensure_extracted_for_content_edit(instance_id).await?;
     Ok(theseus::instance::switch_project_version_with_dependencies(
         instance_id,
         project_path,
@@ -1218,6 +1231,7 @@ pub async fn instance_add_project_from_path(
     project_path: &Path,
     project_type: Option<ProjectType>,
 ) -> Result<String> {
+    ensure_extracted_for_content_edit(instance_id).await?;
     Ok(theseus::instance::add_project_from_path(
         instance_id,
         project_path,
@@ -1237,6 +1251,7 @@ pub async fn instance_toggle_disable_project(
     project_path: &str,
     desired_enabled: Option<bool>,
 ) -> Result<String> {
+    ensure_extracted_for_content_edit(instance_id).await?;
     Ok(theseus::instance::toggle_disable_project(
         instance_id,
         project_path,
@@ -1251,6 +1266,7 @@ pub async fn instance_set_project_locked(
     project_path: &str,
     locked: bool,
 ) -> Result<()> {
+    ensure_extracted_for_content_edit(instance_id).await?;
     theseus::instance::set_project_locked(instance_id, project_path, locked)
         .await?;
     Ok(())
@@ -1261,6 +1277,7 @@ pub async fn instance_remove_project(
     instance_id: &str,
     project_path: &str,
 ) -> Result<()> {
+    ensure_extracted_for_content_edit(instance_id).await?;
     theseus::instance::remove_project(instance_id, project_path).await?;
     Ok(())
 }
@@ -1270,6 +1287,7 @@ pub async fn instance_update_managed_modrinth_version(
     instance_id: String,
     version_id: String,
 ) -> Result<theseus::install::InstallJobSnapshot> {
+    ensure_extracted_for_content_edit(&instance_id).await?;
     Ok(theseus::instance::update_managed_modrinth_version(
         &instance_id,
         &version_id,
@@ -1281,6 +1299,7 @@ pub async fn instance_update_managed_modrinth_version(
 pub async fn instance_repair_managed_modrinth(
     instance_id: &str,
 ) -> Result<theseus::install::InstallJobSnapshot> {
+    ensure_extracted_for_content_edit(instance_id).await?;
     Ok(theseus::instance::repair_managed_modrinth(instance_id).await?)
 }
 

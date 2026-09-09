@@ -81,6 +81,18 @@ const port = ref(25565)
 const motd = ref('A ChocoModrinth server')
 const difficulty = ref('normal')
 const gamemode = ref('survival')
+const difficultyLabels: Record<string, string> = {
+	peaceful: 'Peaceful',
+	easy: 'Easy',
+	normal: 'Normal',
+	hard: 'Hard',
+}
+const gamemodeLabels: Record<string, string> = {
+	survival: 'Survival',
+	creative: 'Creative',
+	adventure: 'Adventure',
+	spectator: 'Spectator',
+}
 const maxPlayers = ref(20)
 const onlineMode = ref(true)
 const acceptEula = ref(false)
@@ -593,34 +605,30 @@ function serverIconUrl(server: ChocoServer): string | null {
 						/>
 					</div>
 					<div>
-						<label class="mb-1 block font-semibold text-contrast" for="server-difficulty">
-							Difficulty
-						</label>
-						<select
-							id="server-difficulty"
+						<span class="mb-1 block font-semibold text-contrast">Difficulty</span>
+						<Combobox
 							v-model="difficulty"
-							class="w-full rounded-xl border-0 border-solid border-divider bg-surface-3 px-3 py-2 text-contrast"
-						>
-							<option>peaceful</option>
-							<option>easy</option>
-							<option>normal</option>
-							<option>hard</option>
-						</select>
+							:options="[
+								{ value: 'peaceful', label: 'Peaceful' },
+								{ value: 'easy', label: 'Easy' },
+								{ value: 'normal', label: 'Normal' },
+								{ value: 'hard', label: 'Hard' },
+							]"
+							:display-value="difficultyLabels[difficulty] ?? difficulty"
+						/>
 					</div>
 					<div>
-						<label class="mb-1 block font-semibold text-contrast" for="server-gamemode">
-							Game mode
-						</label>
-						<select
-							id="server-gamemode"
+						<span class="mb-1 block font-semibold text-contrast">Game mode</span>
+						<Combobox
 							v-model="gamemode"
-							class="w-full rounded-xl border-0 border-solid border-divider bg-surface-3 px-3 py-2 text-contrast"
-						>
-							<option>survival</option>
-							<option>creative</option>
-							<option>adventure</option>
-							<option>spectator</option>
-						</select>
+							:options="[
+								{ value: 'survival', label: 'Survival' },
+								{ value: 'creative', label: 'Creative' },
+								{ value: 'adventure', label: 'Adventure' },
+								{ value: 'spectator', label: 'Spectator' },
+							]"
+							:display-value="gamemodeLabels[gamemode] ?? gamemode"
+						/>
 					</div>
 				</div>
 
