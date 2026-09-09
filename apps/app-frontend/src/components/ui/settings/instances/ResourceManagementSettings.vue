@@ -78,6 +78,10 @@ const messages = defineMessages({
 		id: 'app.settings.resource-management.profiles-folder.reset',
 		defaultMessage: 'Reset to default',
 	},
+	moveProfilesButton: {
+		id: 'app.settings.resource-management.profiles-folder.move-button',
+		defaultMessage: 'Move profiles…',
+	},
 	moveModalHeader: {
 		id: 'app.settings.resource-management.profiles-folder.move-modal-header',
 		defaultMessage: 'Change profiles folder',
@@ -252,6 +256,15 @@ async function resetProfilesDir() {
 	await showMoveModal(defaultProfilesDir.value, true)
 }
 
+async function moveMoreProfiles() {
+	const target = settings.value.custom_profiles_dir || defaultProfilesDir.value
+	if (!target) {
+		handleError('No profiles folder is set')
+		return
+	}
+	await showMoveModal(target, false)
+}
+
 async function showMoveModal(dir, isReset) {
 	pendingDir.value = dir
 	pendingReset.value = isReset
@@ -283,7 +296,9 @@ async function confirmMove(moveSelected) {
 				}
 			}
 		}
-		settings.value.custom_profiles_dir = pendingReset.value ? null : pendingDir.value
+		// Moving into the default folder is equivalent to having no custom folder
+		const keepCustomDir = !pendingReset.value && pendingDir.value !== defaultProfilesDir.value
+		settings.value.custom_profiles_dir = keepCustomDir ? pendingDir.value : null
 		moveModal.value?.hide()
 	} catch (error) {
 		handleError(error)
@@ -349,8 +364,15 @@ async function confirmMove(moveSelected) {
 						</IconButton>
 					</template>
 				</Input>
-				<Button v-if="settings.custom_profiles_dir" @click="resetProfilesDir">
+				<Button
+					v-if="settings.custom_profiles_dir"
+					class="shrink-0"
+					@click="resetProfilesDir"
+				>
 					{{ formatMessage(messages.resetProfilesFolder) }}
+				</Button>
+				<Button class="shrink-0" @click="moveMoreProfiles">
+					{{ formatMessage(messages.moveProfilesButton) }}
 				</Button>
 			</div>
 			<p class="m-0 leading-tight text-secondary">

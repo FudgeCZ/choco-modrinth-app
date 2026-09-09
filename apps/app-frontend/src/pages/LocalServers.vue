@@ -45,12 +45,49 @@ import {
 import type { GameInstance } from '@/helpers/types'
 import { getInstanceIconUrl, list as list_instances } from '@/helpers/instance'
 import { get_instance_worlds } from '@/helpers/worlds'
+import { progress_bars_list, type LoadingBar } from '@/helpers/state'
+import { useAppEvent } from '@/composables/use-app-event'
 
 const { handleError, pushNotification } = injectNotificationManager()
 
 const servers = ref<ChocoServer[]>([])
 const loading = ref(true)
 const highlightId = ref<string | null>(null)
+
+type CreatingServer = {
+	key: string
+	name: string
+	loaderLabel: string
+	gameVersion: string
+	message: string
+	progress: number | null
+}
+
+const creatingServers = ref<CreatingServer[]>([])
+
+// Server setup reports its phases via loading bars with an empty instance id
+// (they also feed the downloads notification); mirror them onto the grid card.
+function updateCreatingProgress(bars: Record<string, LoadingBar>) {
+	for (const entry of creatingServers.value) {
+		const bar = Object.values(bars).find(
+			(candidate) =>
+				candidate.bar_type?.type === 'zip_extract' &&
+				!candidate.bar_type?.instance_id &&
+				candidate.bar_type?.instance_name === entry.name,
+		)
+		if (bar) {
+			entry.message = bar.message ?? entry.message
+			const current = bar.current ?? 0
+			const total = bar.total ?? 0
+			entry.progress = total > 0 ? Math.max(0, Math.min(1, current / total)) : null
+		}
+	}
+}
+
+useAppEvent('loading', async () => {
+	const bars = await progress_bars_list().catch(() => ({}))
+	updateCreatingProgress(bars)
+})
 
 const loaderLabels: Record<ServerLoader, string> = {
 	vanilla: 'Vanilla',
@@ -241,14 +278,21 @@ watch(selectedProfileId, async () => {
 
 async function submitCreate() {
 	creating.value = true
-	const notification = pushNotification({
-		title: 'Creating server',
-		text: `Downloading ${loaderLabels[selectedLoader.value]} ${gameVersion.value}...`,
-		loading: true,
-	})
+	const entry: CreatingServer = {
+		key: `create-${Date.now()}`,
+		name: name.value.trim() || 'New server',
+		loaderLabel: loaderLabels[selectedLoader.value],
+		gameVersion: gameVersion.value,
+		message: 'Preparing...',
+		progress: null,
+	}
+	creatingServers.value.push(entry)
+	createModal.value?.hide()
+	name.value = ''
+	acceptEula.value = false
 	try {
 		const server = await create_server({
-			name: name.value.trim(),
+			name: entry.name,
 			game_version: gameVersion.value,
 			loader: selectedLoader.value,
 			loader_version: loaderVersion.value || null,
@@ -261,20 +305,12 @@ async function submitCreate() {
 			online_mode: onlineMode.value,
 			accept_eula: acceptEula.value,
 		})
-		notification.update({
-			title: 'Server created',
-			text: `${server.name} is ready to play.`,
-			loading: false,
-			type: 'success',
-		})
-		createModal.value?.hide()
-		name.value = ''
-		acceptEula.value = false
+		highlightId.value = server.id
 		await refresh()
 	} catch (error) {
-		notification.hide()
 		handleError(error)
 	} finally {
+		creatingServers.value = creatingServers.value.filter((c) => c.key !== entry.key)
 		creating.value = false
 	}
 }
@@ -282,11 +318,17 @@ async function submitCreate() {
 async function submitCreateFromProfile() {
 	if (!selectedProfile.value) return
 	creating.value = true
-	const notification = pushNotification({
-		title: 'Creating server from profile',
-		text: `Setting up a server for ${selectedProfile.value.name}...`,
-		loading: true,
-	})
+	const entry: CreatingServer = {
+		key: `create-${Date.now()}`,
+		name: `${selectedProfile.value.name} Server`,
+		loaderLabel: loaderLabels[selectedProfile.value.loader as ServerLoader],
+		gameVersion: selectedProfile.value.game_version ?? '',
+		message: 'Preparing...',
+		progress: null,
+	}
+	creatingServers.value.push(entry)
+	createModal.value?.hide()
+	acceptEula.value = false
 	try {
 		const server = await create_server_from_profile({
 			instanceId: selectedProfile.value.id,
@@ -297,21 +339,13 @@ async function submitCreateFromProfile() {
 			ramMb: ramMb.value,
 			port: port.value,
 		})
-		notification.update({
-			title: 'Server created',
-			text: `${server.name} is ready to play.`,
-			loading: false,
-			type: 'success',
-		})
-		createModal.value?.hide()
-		acceptEula.value = false
-		await refresh()
 		highlightId.value = server.id
 		runningServers.value[server.id] = false
+		await refresh()
 	} catch (error) {
-		notification.hide()
 		handleError(error)
 	} finally {
+		creatingServers.value = creatingServers.value.filter((c) => c.key !== entry.key)
 		creating.value = false
 	}
 }
@@ -402,7 +436,10 @@ function serverIconUrl(server: ChocoServer): string | null {
 			<SpinnerIcon class="animate-spin size-8" />
 		</div>
 
-		<div v-else-if="servers.length === 0" class="flex flex-col items-center gap-3 py-16">
+		<div
+			v-else-if="servers.length === 0 && creatingServers.length === 0"
+			class="flex flex-col items-center gap-3 py-16"
+		>
 			<ArchiveIcon class="size-12 text-secondary" />
 			<p class="m-0 text-lg font-semibold text-contrast">No servers yet</p>
 			<p class="m-0 max-w-md text-center text-secondary">
@@ -416,6 +453,39 @@ function serverIconUrl(server: ChocoServer): string | null {
 		</div>
 
 		<div v-else class="flex flex-col gap-3">
+			<div
+				v-for="entry in creatingServers"
+				:key="entry.key"
+				class="rounded-2xl border-0 border-solid border-divider p-4 bg-surface-2"
+			>
+				<div class="flex flex-wrap items-center gap-3">
+					<div
+						class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-surface-4"
+					>
+						<SpinnerIcon class="size-6 animate-spin text-brand" />
+					</div>
+					<div class="flex min-w-0 flex-1 flex-col gap-1.5">
+						<p class="m-0 truncate text-lg font-bold text-contrast">
+							{{ entry.name }}
+						</p>
+						<p class="m-0 text-sm text-secondary">
+							{{ entry.loaderLabel }} {{ entry.gameVersion }} · {{ entry.message }}
+						</p>
+						<div class="h-1.5 w-full overflow-hidden rounded-full bg-surface-5">
+							<div
+								class="h-full rounded-full bg-brand transition-[width] duration-300"
+								:class="entry.progress == null ? 'w-2/5 animate-pulse' : ''"
+								:style="
+									entry.progress != null
+										? { width: `${Math.round(entry.progress * 100)}%` }
+										: undefined
+								"
+							/>
+						</div>
+					</div>
+				</div>
+			</div>
+
 			<div
 				v-for="server in servers"
 				:key="server.id"
