@@ -29,6 +29,9 @@
 					>
 						{{ selectedProcess.instance.name }}
 					</router-link>
+					<span v-if="runningServersCount > 0" class="text-secondary">
+						&middot; {{ runningServersLabel }}
+					</span>
 					<Dropdown
 						v-if="currentProcesses.length > 1"
 						placement="bottom"
@@ -116,7 +119,13 @@
 			</template>
 			<template v-else>
 				<span class="size-2 rounded-full bg-secondary" />
-				<span class="text-secondary"> {{ formatMessage(messages.noInstancesRunning) }} </span>
+				<span class="text-secondary">
+					{{
+						runningServersCount > 0
+							? runningServersLabel
+							: formatMessage(messages.noInstancesRunning)
+					}}
+				</span>
 			</template>
 		</div>
 	</div>
@@ -153,6 +162,7 @@ import { trackEvent } from '@/helpers/analytics'
 import { toError } from '@/helpers/errors'
 import { get_many as getInstances } from '@/helpers/instance'
 import { get_all as getRunningProcesses, kill as killProcess } from '@/helpers/process'
+import { runningServers } from '@/helpers/servers'
 import type { LoadingBar } from '@/helpers/state'
 import { progress_bars_list } from '@/helpers/state'
 import type { GameInstance } from '@/helpers/types'
@@ -251,6 +261,15 @@ function toggleDownloadNotifications(): void {
 
 const currentProcesses = ref<RunningProcess[]>([])
 const selectedProcess = ref<RunningProcess | undefined>()
+
+const runningServersCount = computed(() =>
+	Object.values(runningServers.value).filter(Boolean).length,
+)
+const runningServersLabel = computed(() =>
+	runningServersCount.value === 1
+		? '1 server running'
+		: `${runningServersCount.value} servers running`,
+)
 
 const refresh = async () => {
 	const processes = ((await getRunningProcesses().catch((error) => {

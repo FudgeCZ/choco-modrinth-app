@@ -4,13 +4,12 @@ import { Button, injectNotificationManager } from '@modrinth/ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import {
-	get_server_stats,
 	ping_server,
 	send_server_command,
 	serverConsoleLines,
+	serverStats,
 	type ChocoServer,
 	type ServerPing,
-	type ServerStats,
 } from '@/helpers/servers'
 
 import Sparkline from './Sparkline.vue'
@@ -26,22 +25,48 @@ const emit = defineEmits<{
 
 const { handleError } = injectNotificationManager()
 
-const cpuHistory = ref<number[]>([])
-const ramHistory = ref<number[]>([])
-const latestStats = ref<ServerStats | null>(null)
-const statsError = ref(false)
+const stats = computed(
+	() => serverStats.value[props.server.id] ?? { cpu: [], ram: [], latest: null },
+)
 
 const ping = ref<ServerPing | null>(null)
 const pinging = ref(false)
 
 const chatMessage = ref('')
 
-let statsInterval: number | undefined
 let pingInterval: number | undefined
+
+type ChatLine = { speaker: string; message: string }
+
+/**
+ * Parses a console line into a chat entry.
+ * Handles player chat (`<Steve> hello`), `/say` from the console
+ * (`[Not Secure] [Server] hi` or `[Server] hi`) and returns null for
+ * anything else (joins, deaths, plugin spam, …).
+ */
+function parseChatLine(line: string): ChatLine | null {
+	const body = line.replace(/^\[[^\]]*\]\s*\[[^\]]*\]:\s*/, '')
+	if (body === line) return null // missing "[time] [thread/level]: " prefix
+
+	// Player chat: <Steve> hello world
+	let match = /^<([^>]+)>\s*(.*)$/.exec(body)
+	if (match) return { speaker: match[1], message: match[2] }
+
+	// /say from console: [Not Secure] [Server] hi
+	match = /^\[Not Secure\]\s*\[([^\]]+)\]\s*(.*)$/.exec(body)
+	if (match) return { speaker: match[1], message: match[2] }
+
+	// /say from RCON or plugins: [Server] hi
+	match = /^\[([^\]]+)\]\s*(.*)$/.exec(body)
+	if (match && match[1] === 'Server') return { speaker: match[1], message: match[2] }
+
+	return null
+}
 
 const chatLines = computed(() =>
 	(serverConsoleLines.value[props.server.id] ?? [])
-		.filter((line) => /\]:\s*<[^>]+>/.test(line))
+		.map(parseChatLine)
+		.filter((entry): entry is ChatLine => entry !== null)
 		.slice(-30),
 )
 
@@ -62,24 +87,6 @@ watch(
 	},
 	{ immediate: true },
 )
-
-async function pollStats() {
-	if (!props.running) {
-		statsError.value = false
-		return
-	}
-	try {
-		const stats = await get_server_stats(props.server.id)
-		latestStats.value = stats
-		statsError.value = false
-		cpuHistory.value.push(Math.min(stats.cpu_percent, 100))
-		ramHistory.value.push(Math.min(stats.ram_percent, 100))
-		if (cpuHistory.value.length > 120) cpuHistory.value.shift()
-		if (ramHistory.value.length > 120) ramHistory.value.shift()
-	} catch {
-		statsError.value = true
-	}
-}
 
 async function pollPing() {
 	if (!props.running) {
@@ -104,48 +111,45 @@ function sendChat() {
 }
 
 onMounted(() => {
-	void pollStats()
 	void pollPing()
-	statsInterval = window.setInterval(pollStats, 1000)
 	pingInterval = window.setInterval(pollPing, 15000)
 })
 
 onUnmounted(() => {
-	if (statsInterval) window.clearInterval(statsInterval)
 	if (pingInterval) window.clearInterval(pingInterval)
 })
 </script>
 
 <template>
 	<div class="grid grid-cols-1 gap-4 xl:grid-cols-[24rem_1fr]">
-		<div class="flex flex-col gap-4 rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4">
+		<div class="flex h-full min-h-[calc(100vh-24rem)] flex-col gap-4 rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4">
 			<h2 class="m-0 text-lg font-semibold text-contrast">Stats</h2>
 			<template v-if="running">
 				<div>
 					<div class="mb-1 flex items-baseline justify-between">
 						<span class="font-semibold text-contrast">RAM</span>
 						<span class="text-xl font-bold text-brand">
-							{{ Math.round(latestStats?.ram_percent ?? 0) }}%
+							{{ Math.round(stats.latest?.ram_percent ?? 0) }}%
 						</span>
 					</div>
-					<Sparkline :values="ramHistory" />
+					<Sparkline :values="stats.ram" />
 					<p class="m-0 text-xs text-secondary">
-						{{ latestStats?.ram_mb ?? 0 }} MB used by the server process
+						{{ stats.latest?.ram_mb ?? 0 }} MB used by the server process
 					</p>
 				</div>
 				<div>
 					<div class="mb-1 flex items-baseline justify-between">
 						<span class="font-semibold text-contrast">CPU</span>
 						<span class="text-xl font-bold text-brand">
-							{{ Math.round(latestStats?.cpu_percent ?? 0) }}%
+							{{ Math.round(stats.latest?.cpu_percent ?? 0) }}%
 						</span>
 					</div>
-					<Sparkline :values="cpuHistory" />
+					<Sparkline :values="stats.cpu" />
 					<p class="m-0 text-xs text-secondary">
 						of one core, averaged over the last second
 					</p>
 				</div>
-				<p v-if="statsError && !latestStats" class="m-0 text-xs text-secondary">
+				<p v-if="!stats.latest" class="m-0 text-xs text-secondary">
 					Waiting for stats…
 				</p>
 			</template>
@@ -154,8 +158,8 @@ onUnmounted(() => {
 			</p>
 		</div>
 
-		<div class="flex flex-col gap-4">
-			<div class="flex min-h-[16rem] flex-col rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4">
+		<div class="flex min-h-[calc(100vh-24rem)] flex-col gap-4">
+			<div class="flex min-h-[16rem] flex-1 flex-col rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4">
 				<h2 class="m-0 text-lg font-semibold text-contrast">Players &amp; chat</h2>
 				<div v-if="running" class="mb-2 flex flex-wrap items-center gap-2 text-sm text-secondary">
 					<span>
@@ -187,7 +191,7 @@ onUnmounted(() => {
 							Chat messages appear here.
 						</p>
 						<p v-for="(line, index) in chatLines" :key="index" class="m-0 break-words">
-							{{ line.replace(/^\[[^\]]+\]\s*\[[^\]]+\]:\s*/, '') }}
+							{{ line.speaker }}: {{ line.message }}
 						</p>
 					</div>
 					<form class="flex gap-2" @submit.prevent="sendChat">
@@ -202,7 +206,7 @@ onUnmounted(() => {
 				</template>
 			</div>
 
-			<div class="flex flex-col rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4">
+			<div class="flex h-64 flex-col rounded-2xl border-0 border-solid border-divider bg-surface-2 p-4">
 				<div class="flex items-center justify-between gap-2">
 					<h2 class="m-0 text-lg font-semibold text-contrast">Console</h2>
 					<Button @click="emit('open-console')">
@@ -212,7 +216,7 @@ onUnmounted(() => {
 				</div>
 				<pre
 					ref="previewElement"
-					class="mt-2 h-40 overflow-y-auto rounded-xl bg-surface-3 p-3 text-xs whitespace-pre-wrap text-secondary"
+					class="mt-2 min-h-0 flex-1 overflow-y-auto rounded-xl bg-surface-3 p-3 text-xs whitespace-pre-wrap text-secondary"
 					>{{ consolePreview.length > 0 ? consolePreview.join('\n') : 'Console output appears here while the server is running.' }}</pre
 				>
 			</div>

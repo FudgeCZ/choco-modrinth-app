@@ -4,54 +4,51 @@ import {
 	EyeIcon,
 	EyeOffIcon,
 	FolderOpenIcon,
+	GaugeIcon,
+	MoreVerticalIcon,
 	PlayIcon,
 	PlusIcon,
 	SpinnerIcon,
 	StopCircleIcon,
-	TrashIcon,
-	MoreVerticalIcon,
 } from '@modrinth/assets'
+import type { ButtonMenuOption } from '@modrinth/ui'
 import {
 	Button,
 	Chips,
 	Combobox,
-	ConfirmModal,
 	injectNotificationManager,
-	TeleportOverflowMenu,
 	NewModal,
 	Slider,
+	TeleportOverflowMenu,
 	Toggle,
 } from '@modrinth/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { useRouter } from 'vue-router'
 import { computed, defineComponent, h, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
+import { useAppEvent } from '@/composables/use-app-event'
+import { getInstanceIconUrl, list as list_instances } from '@/helpers/instance'
 import {
-	type ChocoServer,
 	accept_server_eula,
+	type ChocoServer,
 	create_server,
 	create_server_from_profile,
-	delete_server,
-	type ServerLoader,
-	loader_versions,
-	list_servers,
-	minecraft_versions,
-	type ServerLoaderVersion,
 	init_server_listeners,
 	is_server_running,
-	runningServers,
-	run_server,
-	serverConsoleLines,
-	stop_server,
+	list_servers,
+	loader_versions,
+	minecraft_versions,
 	open_server_folder,
+	run_server,
+	runningServers,
+	type ServerLoader,
+	type ServerLoaderVersion,
+	stop_server,
 	sync_profile_content,
 } from '@/helpers/servers'
-import type { ButtonMenuOption } from '@modrinth/ui'
+import { type LoadingBar,progress_bars_list } from '@/helpers/state'
 import type { GameInstance } from '@/helpers/types'
-import { getInstanceIconUrl, list as list_instances } from '@/helpers/instance'
 import { get_instance_worlds } from '@/helpers/worlds'
-import { progress_bars_list, type LoadingBar } from '@/helpers/state'
-import { useAppEvent } from '@/composables/use-app-event'
 
 const { handleError, pushNotification } = injectNotificationManager()
 
@@ -105,8 +102,6 @@ const loaderLabels: Record<ServerLoader, string> = {
 }
 
 const createModal = useTemplateRef('createModal')
-const confirmDeleteModal = useTemplateRef('confirmDeleteModal')
-const deleteServerId = ref<string | null>(null)
 
 // Tab switch: create from scratch or from an existing profile
 const creationTab = ref<'scratch' | 'profile'>('scratch')
@@ -400,27 +395,6 @@ async function openFolder(server: ChocoServer) {
 	}
 }
 
-function confirmDelete(server: ChocoServer) {
-	deleteServerId.value = server.id
-	confirmDeleteModal.value?.show()
-}
-
-async function doDelete() {
-	if (!deleteServerId.value) return
-	try {
-		await delete_server(deleteServerId.value)
-		await refresh()
-	} catch (error) {
-		handleError(error)
-	} finally {
-		deleteServerId.value = null
-	}
-}
-
-function formatConsole(serverId: string): string {
-	return (serverConsoleLines.value[serverId] ?? []).join('\n')
-}
-
 function serverIconUrl(server: ChocoServer): string | null {
 	return server.icon_file ? convertFileSrc(server.icon_file) : null
 }
@@ -455,11 +429,10 @@ function serverMenuOptions(server: ChocoServer): ButtonMenuOption[] {
 		})
 	}
 	options.push({
-		id: 'delete',
-		label: 'Delete',
-		icon: TrashIcon,
-		tone: 'red',
-		action: () => confirmDelete(server),
+		id: 'open-dashboard',
+		label: 'Open dashboard',
+		icon: GaugeIcon,
+		action: () => openDashboardPage(server),
 	})
 	return options
 }
@@ -601,7 +574,7 @@ async function acceptEulaFor(server: ChocoServer) {
 				<div class="mt-auto p-2 pt-0" @click.stop>
 					<Button
 						v-if="!server.eula_accepted"
-						class="w-full"
+						class="w-full py-2"
 						@click="acceptEulaFor(server)"
 					>
 						Accept EULA
@@ -609,7 +582,7 @@ async function acceptEulaFor(server: ChocoServer) {
 					<Button
 						v-else-if="runningServers[server.id]"
 						color="red"
-						class="w-full"
+						class="w-full py-2"
 						@click="toggleRun(server)"
 					>
 						<StopCircleIcon aria-hidden="true" />
@@ -618,7 +591,7 @@ async function acceptEulaFor(server: ChocoServer) {
 					<Button
 						v-else
 						color="brand"
-						class="w-full"
+						class="w-full py-2"
 						@click="toggleRun(server)"
 					>
 						<PlayIcon aria-hidden="true" />
@@ -835,15 +808,6 @@ async function acceptEulaFor(server: ChocoServer) {
 				</Button>
 			</div>
 		</NewModal>
-
-		<ConfirmModal
-			ref="confirmDeleteModal"
-			title="Delete this server?"
-			description="The server folder and all its files will be permanently deleted. This cannot be undone."
-			:has-to-type="false"
-			proceed-label="Delete"
-			@proceed="doDelete"
-		/>
 
 
 	</div>

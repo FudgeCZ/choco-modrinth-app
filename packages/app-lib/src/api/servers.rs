@@ -139,35 +139,86 @@ pub struct ServerLoaderVersion {
     pub recommended: bool,
 }
 
+/// Global settings for the servers feature (stored in the servers index)
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ServerIndexSettings {
+    #[serde(default = "default_true")]
+    pub single_instance: bool,
+}
+
+impl Default for ServerIndexSettings {
+    fn default() -> Self {
+        Self {
+            single_instance: true,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Default)]
 struct ServersIndex {
     servers: Vec<ChocoServer>,
+    #[serde(default)]
+    settings: ServerIndexSettings,
 }
 
 fn servers_index_path(state: &State) -> PathBuf {
     state.directories.servers_dir().join(SERVERS_INDEX_FILE)
 }
 
-pub async fn list_servers() -> crate::Result<Vec<ChocoServer>> {
-    let state = State::get().await?;
-    let path = servers_index_path(&state);
+/// Reads the servers index (with defaults when the file does not exist yet)
+async fn read_servers_index(state: &State) -> crate::Result<ServersIndex> {
+    let path = servers_index_path(state);
     if !path.exists() {
-        return Ok(Vec::new());
+        return Ok(ServersIndex::default());
     }
     let content = std::fs::read_to_string(&path)
         .map_err(|e| crate::ErrorKind::FSError(format!("Failed to read servers index: {e}")))?;
-    let index: ServersIndex = serde_json::from_str(&content)
-        .map_err(|e| crate::ErrorKind::FSError(format!("Failed to parse servers index: {e}")))?;
-    Ok(index.servers)
+    let index: ServersIndex = serde_json::from_str(&content).map_err(|e| {
+        crate::ErrorKind::FSError(format!("Failed to parse servers index: {e}"))
+    })?;
+    Ok(index)
+}
+
+pub async fn list_servers() -> crate::Result<Vec<ChocoServer>> {
+    let state = State::get().await?;
+    Ok(read_servers_index(&state).await?.servers)
 }
 
 async fn write_servers_index(state: &State, servers: &[ChocoServer]) -> crate::Result<()> {
     let dir = state.directories.servers_dir();
     crate::util::io::create_dir_all(&dir).await?;
+    // Keep any existing settings when re-saving the index
+    let settings = read_servers_index(state)
+        .await
+        .map(|index| index.settings)
+        .unwrap_or_default();
     let content = serde_json::to_string_pretty(&ServersIndex {
         servers: servers.to_vec(),
+        settings,
     })?;
     std::fs::write(servers_index_path(state), content)
+        .map_err(|e| crate::ErrorKind::FSError(format!("Failed to write servers index: {e}")))?;
+    Ok(())
+}
+
+/// Whether only one server may run at a time (defaults to true)
+pub async fn get_single_instance_mode() -> crate::Result<bool> {
+    let state = State::get().await?;
+    Ok(read_servers_index(&state).await?.settings.single_instance)
+}
+
+pub async fn set_single_instance_mode(enabled: bool) -> crate::Result<()> {
+    let state = State::get().await?;
+    let mut index = read_servers_index(&state).await?;
+    index.settings.single_instance = enabled;
+    let dir = state.directories.servers_dir();
+    crate::util::io::create_dir_all(&dir).await?;
+    let content = serde_json::to_string_pretty(&index)?;
+    std::fs::write(servers_index_path(&state), content)
         .map_err(|e| crate::ErrorKind::FSError(format!("Failed to write servers index: {e}")))?;
     Ok(())
 }
@@ -365,17 +416,252 @@ pub async fn accept_server_eula(server_id: &str) -> crate::Result<()> {
     Ok(())
 }
 
-pub async fn delete_server(server_id: &str) -> crate::Result<()> {
+pub async fn delete_server(server_id: &str, save_world_to_profile: bool) -> crate::Result<()> {
     let state = State::get().await?;
     let mut servers = list_servers().await?;
     if let Some(pos) = servers.iter().position(|s| s.id == server_id) {
         let server = servers.remove(pos);
         let dir = server_dir(&state, &server.path);
+
+        // Optionally copy the world into the linked profile's saves folder
+        // before the server folder is removed
+        if save_world_to_profile && let Some(instance_id) = server.linked_instance_id.as_deref() {
+            if !instance_id.is_empty() {
+                let props = get_server_properties(server_id).await?;
+                let level_name = props
+                    .iter()
+                    .find(|(key, _)| key == "level-name")
+                    .map(|(_, value)| value.clone())
+                    .unwrap_or_else(|| "world".to_string());
+                let source = dir.join(&level_name);
+                if source.is_dir() {
+                    let instance_dir =
+                        crate::api::instance::get_full_path(instance_id).await?;
+                    let saves_dir = instance_dir.join("saves");
+                    let base_name =
+                        format!("{} (server)", sanitize_server_name(&server.name));
+                    let mut dest = saves_dir.join(&base_name);
+                    let mut suffix = 2;
+                    while dest.exists() {
+                        dest = saves_dir.join(format!("{base_name} ({suffix})"));
+                        suffix += 1;
+                    }
+                    copy_dir_all(&source, &dest, None).await?;
+                }
+            }
+        }
+
         if dir.exists() {
             tokio::fs::remove_dir_all(&dir).await.map_err(|e| {
                 crate::ErrorKind::FSError(format!("Failed to delete server folder: {e}"))
             })?;
         }
+        write_servers_index(&state, &servers).await?;
+    }
+    Ok(())
+}
+
+/// Applies settings changes to a server: display name, RAM, port and the
+/// gameplay keys mirrored into server.properties.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ServerSettingsUpdate {
+    pub name: Option<String>,
+    pub ram_mb: Option<u32>,
+    pub port: Option<u16>,
+    pub motd: Option<String>,
+    pub difficulty: Option<String>,
+    pub gamemode: Option<String>,
+    pub max_players: Option<u32>,
+    pub online_mode: Option<bool>,
+}
+
+pub async fn update_server(
+    server_id: &str,
+    update: ServerSettingsUpdate,
+) -> crate::Result<ChocoServer> {
+    let state = State::get().await?;
+    let mut servers = list_servers().await?;
+    let pos = servers
+        .iter()
+        .position(|s| s.id == server_id)
+        .ok_or_else(|| {
+            crate::ErrorKind::InputError(format!("Server {server_id} was not found"))
+        })?;
+
+    if let Some(name) = update.name {
+        servers[pos].name = name;
+    }
+    if let Some(ram_mb) = update.ram_mb {
+        servers[pos].ram_mb = ram_mb;
+    }
+    if let Some(port) = update.port {
+        servers[pos].port = port;
+    }
+
+    // Mirror gameplay settings into server.properties
+    let mut props = get_server_properties(server_id).await?;
+    let overrides = [
+        ("motd", update.motd),
+        ("server-port", update.port.map(|p| p.to_string())),
+        ("max-players", update.max_players.map(|m| m.to_string())),
+        ("difficulty", update.difficulty),
+        ("gamemode", update.gamemode),
+        ("online-mode", update.online_mode.map(|b| b.to_string())),
+    ];
+    for (key, value) in overrides {
+        if let Some(value) = value {
+            if let Some(entry) = props.iter_mut().find(|(k, _)| k == key) {
+                entry.1 = value;
+            } else {
+                props.push((key.to_string(), value));
+            }
+        }
+    }
+    set_server_properties(server_id, props).await?;
+
+    write_servers_index(&state, &servers).await?;
+    Ok(servers[pos].clone())
+}
+
+/// Writes a PNG (base64-encoded) as the server's icon and records it in the
+/// servers index.
+pub async fn set_server_icon(server_id: &str, png_base64: String) -> crate::Result<()> {
+    let state = State::get().await?;
+    let server = get_server_by_id(&state, server_id).await?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&png_base64)
+        .map_err(|e| {
+            crate::ErrorKind::InputError(format!("Invalid base64 icon data: {e}"))
+        })?;
+    let dir = server_dir(&state, &server.path);
+    crate::util::io::create_dir_all(&dir).await?;
+    let dest = dir.join("server-icon.png");
+    tokio::fs::write(&dest, &bytes)
+        .await
+        .map_err(|e| crate::util::io::IOError::with_path(e, &dest))?;
+
+    let mut servers = list_servers().await?;
+    if let Some(pos) = servers.iter().position(|s| s.id == server_id) {
+        servers[pos].icon_file = Some("server-icon.png".to_string());
+        write_servers_index(&state, &servers).await?;
+    }
+    Ok(())
+}
+
+/// Re-downloads the server jar for the same loader with a new loader version,
+/// reusing the existing server folder (world, config and content are kept).
+pub async fn change_server_loader_version(
+    server_id: &str,
+    new_loader_version: &str,
+) -> crate::Result<()> {
+    let state = State::get().await?;
+    let server = get_server_by_id(&state, server_id).await?;
+    let dir = server_dir(&state, &server.path);
+    crate::util::io::create_dir_all(&dir).await?;
+
+    let java_path = server.java_path.clone().unwrap_or_default();
+    let java_path = Path::new(&java_path);
+
+    let message = format!("Downloading {} server...", server.loader.as_str());
+    let progress = (server.name.as_str(), message.as_str());
+    let jar_file: Option<String>;
+    let mut loader_version = Some(new_loader_version.to_string());
+
+    match server.loader {
+        ServerLoader::Vanilla => {
+            download_vanilla_server(&state, &server.game_version, &dir, Some(progress))
+                .await?;
+            jar_file = Some("server.jar".to_string());
+        }
+        ServerLoader::Fabric => {
+            download_fabric_quilt_server(
+                &state,
+                false,
+                &server.game_version,
+                Some(new_loader_version),
+                &dir,
+                Some(progress),
+            )
+            .await?;
+            jar_file = Some("server.jar".to_string());
+        }
+        ServerLoader::Quilt => {
+            download_fabric_quilt_server(
+                &state,
+                true,
+                &server.game_version,
+                Some(new_loader_version),
+                &dir,
+                Some(progress),
+            )
+            .await?;
+            jar_file = Some("server.jar".to_string());
+        }
+        ServerLoader::Paper => {
+            let file = download_paper_server(
+                &state,
+                &server.game_version,
+                Some(new_loader_version),
+                &dir,
+                Some(progress),
+            )
+            .await?;
+            jar_file = Some(file);
+        }
+        ServerLoader::Purpur => {
+            let file = download_purpur_server(
+                &state,
+                &server.game_version,
+                Some(new_loader_version),
+                &dir,
+                Some(progress),
+            )
+            .await?;
+            jar_file = Some(file);
+        }
+        ServerLoader::Forge => {
+            if java_path.as_os_str().is_empty() {
+                return Err(crate::ErrorKind::InputError(
+                    "No Java runtime is configured for this server".to_string(),
+                )
+                .into());
+            }
+            let version = download_forge_server(
+                &state,
+                &server.game_version,
+                Some(new_loader_version),
+                java_path,
+                &dir,
+                &server.name,
+            )
+            .await?;
+            loader_version = Some(version);
+            jar_file = None;
+        }
+        ServerLoader::NeoForge => {
+            if java_path.as_os_str().is_empty() {
+                return Err(crate::ErrorKind::InputError(
+                    "No Java runtime is configured for this server".to_string(),
+                )
+                .into());
+            }
+            download_neoforge_server(
+                &state,
+                &server.game_version,
+                Some(new_loader_version),
+                java_path,
+                &dir,
+                &server.name,
+            )
+            .await?;
+            jar_file = None;
+        }
+    }
+
+    let mut servers = list_servers().await?;
+    if let Some(pos) = servers.iter().position(|s| s.id == server_id) {
+        servers[pos].loader_version = loader_version;
+        servers[pos].jar_file = jar_file;
         write_servers_index(&state, &servers).await?;
     }
     Ok(())
@@ -2236,6 +2522,8 @@ pub struct PlayerInventoryItem {
 
 #[derive(Serialize, Debug)]
 pub struct PlayerDetails {
+    /// False when the player has no saved data yet (never joined the world)
+    pub available: bool,
     pub name: String,
     pub uuid: String,
     pub hearts: Option<f32>,
@@ -2274,6 +2562,20 @@ pub async fn player_details(
         .unwrap_or_else(|| "world".to_string());
 
     let dat_path = dir.join(&level_name).join("playerdata").join(format!("{uuid}.dat"));
+    if !dat_path.exists() {
+        // The player has not joined the world yet: report empty details
+        // instead of failing with an I/O error
+        return Ok(PlayerDetails {
+            available: false,
+            name: player_name.to_string(),
+            uuid,
+            hearts: None,
+            food: None,
+            game_mode: None,
+            bed: None,
+            inventory: vec![],
+        });
+    }
     let file = std::fs::File::open(&dat_path).map_err(|e| {
         crate::util::io::IOError::with_path(e, &dat_path)
     })?;
@@ -2318,6 +2620,7 @@ pub async fn player_details(
     }
 
     Ok(PlayerDetails {
+        available: true,
         name: player_name.to_string(),
         uuid,
         hearts,

@@ -14,6 +14,10 @@ const props = defineProps<{
 
 const { handleError } = injectNotificationManager()
 
+function asError(error: unknown): Error {
+	return error instanceof Error ? error : new Error(String(error))
+}
+
 const loading = ref(true)
 const saving = ref(false)
 const saved = ref(false)
@@ -96,7 +100,7 @@ onMounted(async () => {
 		}
 		entries.value = props
 	} catch (error) {
-		handleError(error)
+		handleError(asError(error))
 	} finally {
 		loading.value = false
 	}
@@ -112,7 +116,7 @@ async function save() {
 		await set_server_properties(props.server.id, entries.value)
 		saved.value = true
 	} catch (error) {
-		handleError(error)
+		handleError(asError(error))
 	} finally {
 		saving.value = false
 	}
@@ -131,6 +135,7 @@ async function save() {
 			</div>
 			<Button
 				color="brand"
+				size="lg"
 				:loading="saving"
 				:disabled="loading"
 				@click="save"

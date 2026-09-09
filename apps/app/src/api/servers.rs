@@ -26,6 +26,11 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             servers_create_from_profile,
             servers_sync_profile_content,
             servers_delete,
+            servers_update_server,
+            servers_set_icon,
+            servers_change_loader_version,
+            servers_set_single_instance,
+            servers_get_single_instance,
             servers_minecraft_versions,
             servers_loader_versions,
             servers_run,
@@ -85,9 +90,56 @@ pub async fn servers_create(options: CreateServerOptions) -> Result<ChocoServer>
 }
 
 #[tauri::command]
-pub async fn servers_delete(server_id: String) -> Result<()> {
-    theseus::servers::delete_server(&server_id).await?;
+pub async fn servers_delete(
+    server_id: String,
+    save_world_to_profile: Option<bool>,
+) -> Result<()> {
+    theseus::servers::delete_server(&server_id, save_world_to_profile.unwrap_or(false))
+        .await?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn servers_update_server(
+    server_id: String,
+    update: theseus::servers::ServerSettingsUpdate,
+) -> Result<ChocoServer> {
+    Ok(theseus::servers::update_server(&server_id, update).await?)
+}
+
+#[tauri::command]
+pub async fn servers_set_icon(server_id: String, png_base64: String) -> Result<()> {
+    theseus::servers::set_server_icon(&server_id, png_base64).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn servers_change_loader_version(
+    server_id: String,
+    loader_version: String,
+    manager: State<'_, ServerProcessManager>,
+) -> Result<()> {
+    {
+        let processes = manager.processes.lock().await;
+        if processes.contains_key(&server_id) {
+            return Err(server_error(
+                "Stop the server before changing its version",
+            ));
+        }
+    }
+    theseus::servers::change_server_loader_version(&server_id, &loader_version).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn servers_set_single_instance(enabled: bool) -> Result<()> {
+    theseus::servers::set_single_instance_mode(enabled).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn servers_get_single_instance() -> Result<bool> {
+    Ok(theseus::servers::get_single_instance_mode().await?)
 }
 
 #[tauri::command]
@@ -234,6 +286,16 @@ pub async fn servers_run<R: Runtime>(
         let processes = manager.processes.lock().await;
         if processes.contains_key(&server_id) {
             return Err(server_error("Server is already running"));
+        }
+    }
+
+    // Single-server mode: only one server may run at a time
+    if theseus::servers::get_single_instance_mode().await? {
+        let processes = manager.processes.lock().await;
+        if processes.iter().any(|(id, _)| *id != server_id) {
+            return Err(server_error(
+                "Another server is already running. Stop it first (or allow multiple servers in Settings)",
+            ));
         }
     }
 

@@ -75,10 +75,6 @@ export async function sync_profile_content(serverId: string): Promise<void> {
 	return await invoke('plugin:servers|servers_sync_profile_content', { serverId })
 }
 
-export async function delete_server(serverId: string): Promise<void> {
-	return await invoke('plugin:servers|servers_delete', { serverId })
-}
-
 export async function minecraft_versions(): Promise<string[]> {
 	return await invoke('plugin:servers|servers_minecraft_versions')
 }
@@ -127,6 +123,88 @@ export async function default_servers_dir(): Promise<string> {
 
 export async function accept_server_eula(serverId: string): Promise<void> {
 	return await invoke('plugin:servers|servers_accept_eula', { serverId })
+}
+
+export type ServerSettingsUpdate = {
+	name?: string
+	ram_mb?: number
+	port?: number
+	motd?: string
+	difficulty?: string
+	gamemode?: string
+	max_players?: number
+	online_mode?: boolean
+}
+
+export async function update_server(
+	serverId: string,
+	update: ServerSettingsUpdate,
+): Promise<ChocoServer> {
+	return await invoke('plugin:servers|servers_update_server', { serverId, update })
+}
+
+export async function set_server_icon(serverId: string, pngBase64: string): Promise<void> {
+	return await invoke('plugin:servers|servers_set_icon', { serverId, pngBase64 })
+}
+
+export async function change_server_loader_version(
+	serverId: string,
+	loaderVersion: string,
+): Promise<void> {
+	return await invoke('plugin:servers|servers_change_loader_version', {
+		serverId,
+		loaderVersion,
+	})
+}
+
+export async function set_single_server_mode(enabled: boolean): Promise<void> {
+	return await invoke('plugin:servers|servers_set_single_instance', { enabled })
+}
+
+export async function get_single_server_mode(): Promise<boolean> {
+	return await invoke('plugin:servers|servers_get_single_instance')
+}
+
+export async function delete_server(
+	serverId: string,
+	saveWorldToProfile = false,
+): Promise<void> {
+	return await invoke('plugin:servers|servers_delete', {
+		serverId,
+		saveWorldToProfile,
+	})
+}
+
+// Background polling store: live stats for every running server, updated
+// even when no dashboard page is open.
+export const serverStats = ref<
+	Record<string, { cpu: number[]; ram: number[]; latest: ServerStats | null }>
+>({})
+
+let statsPollerStarted = false
+
+function startStatsPoller(): void {
+	if (statsPollerStarted) return
+	statsPollerStarted = true
+	window.setInterval(async () => {
+		for (const [id, running] of Object.entries(runningServers.value)) {
+			if (!running) continue
+			try {
+				const stats = await get_server_stats(id)
+				const entry = serverStats.value[id] ?? {
+					cpu: [],
+					ram: [],
+					latest: null,
+				}
+				entry.cpu = [...entry.cpu, Math.min(stats.cpu_percent, 100)].slice(-120)
+				entry.ram = [...entry.ram, Math.min(stats.ram_percent, 100)].slice(-120)
+				entry.latest = stats
+				serverStats.value = { ...serverStats.value, [id]: entry }
+			} catch {
+				// server may have just stopped; ignore this tick
+			}
+		}
+	}, 1500)
 }
 
 export type ServerStats = {
@@ -218,6 +296,7 @@ export type PlayerInventoryItem = {
 }
 
 export type PlayerDetails = {
+	available: boolean
 	name: string
 	uuid: string
 	hearts: number | null
@@ -259,6 +338,7 @@ export async function init_server_listeners(): Promise<void> {
 	if (listenersInitialized) return
 	listenersInitialized = true
 
+	startStatsPoller()
 	await listen<{ server_id: string; running: boolean }>('server-status', (event) => {
 		runningServers.value[event.payload.server_id] = event.payload.running
 		if (!event.payload.running) {

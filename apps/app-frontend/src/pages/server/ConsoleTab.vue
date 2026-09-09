@@ -21,17 +21,26 @@ const consoleElement = ref<HTMLElement | null>(null)
 const lines = ref<string[]>([])
 
 watch(
-	() => serverConsoleLines.value[props.server.id]?.length,
+	serverConsoleLines,
 	async () => {
-		lines.value = serverConsoleLines.value[props.server.id] ?? []
+		lines.value = [...(serverConsoleLines.value[props.server.id] ?? [])]
 		await nextTick()
-		const element = consoleElement.value
-		if (element) {
-			element.scrollTop = element.scrollHeight
-		}
+		const el = consoleElement.value
+		if (el) el.scrollTop = el.scrollHeight
 	},
-	{ immediate: true },
+	{ immediate: true, deep: true },
 )
+
+async function sendCommand() {
+	const value = command.value.trim()
+	if (!value || !props.running) return
+	try {
+		await send_server_command(props.server.id, value)
+		command.value = ''
+	} catch (error) {
+		handleError(error instanceof Error ? error : new Error(String(error)))
+	}
+}
 </script>
 
 <template>

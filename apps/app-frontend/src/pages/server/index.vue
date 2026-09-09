@@ -7,37 +7,30 @@ import {
 	PlayIcon,
 	StopCircleIcon,
 	TerminalSquareIcon,
-	TrashIcon,
 	UsersIcon,
 	WrenchIcon,
 } from '@modrinth/assets'
-import {
-	Button,
-	Chips,
-	ConfirmModal,
-	injectNotificationManager,
-	NavTabs,
-} from '@modrinth/ui'
+import { Button, injectNotificationManager, NavTabs } from '@modrinth/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import {
 	accept_server_eula,
+	type ChocoServer,
 	is_server_running,
 	list_servers,
 	run_server,
 	stop_server,
-	type ChocoServer,
-	type ServerLoader,
 } from '@/helpers/servers'
 import { useBreadcrumb, useRootBreadcrumb } from '@/providers/breadcrumbs'
 
-import ContentTab from './ContentTab.vue'
 import ConsoleTab from './ConsoleTab.vue'
+import ContentTab from './ContentTab.vue'
 import DashboardTab from './DashboardTab.vue'
 import PlayersTab from './PlayersTab.vue'
 import PropertiesTab from './PropertiesTab.vue'
+import SettingsModal from './SettingsModal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -162,21 +155,14 @@ async function openFolder() {
 	await open_server_folder(server.value.id).catch(handleError)
 }
 
-const deleteModal = useTemplateRef('deleteModal')
-async function confirmDelete() {
+const settingsModal = useTemplateRef('settingsModal')
+function openSettings() {
 	if (!server.value) return
-	deleteModal.value?.show()
+	settingsModal.value?.show(server.value)
 }
 
-async function doDelete() {
-	if (!server.value) return
-	const { delete_server } = await import('@/helpers/servers')
-	try {
-		await delete_server(server.value.id)
-		router.push('/local-servers')
-	} catch (error) {
-		handleError(error)
-	}
+function onSettingsSaved(updated: ChocoServer) {
+	server.value = updated
 }
 
 const loaderLabel = computed(() =>
@@ -301,8 +287,13 @@ function serverIconUrl(value: ChocoServer): string | null {
 					<Button icon-only size="lg" @click="openFolder">
 						<FolderOpenIcon aria-hidden="true" />
 					</Button>
-					<Button icon-only size="lg" color="red" @click="confirmDelete">
-						<TrashIcon aria-hidden="true" />
+					<Button
+						v-tooltip="'More settings'"
+						icon-only
+						size="lg"
+						@click="openSettings"
+					>
+						<WrenchIcon aria-hidden="true" />
 					</Button>
 				</div>
 			</div>
@@ -342,13 +333,10 @@ function serverIconUrl(value: ChocoServer): string | null {
 			/>
 		</template>
 
-		<ConfirmModal
-			ref="deleteModal"
-			title="Delete this server?"
-			description="The server folder and all its files will be permanently deleted. This cannot be undone."
-			:has-to-type="false"
-			proceed-label="Delete"
-			@proceed="doDelete"
+		<SettingsModal
+			ref="settingsModal"
+			@saved="onSettingsSaved"
+			@deleted="router.push('/local-servers')"
 		/>
 	</div>
 </template>
