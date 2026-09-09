@@ -21,7 +21,7 @@ import {
 	Toggle,
 } from '@modrinth/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, defineComponent, h, onMounted, ref, useTemplateRef, watch } from 'vue'
 
 import {
 	type ChocoServer,
@@ -43,7 +43,7 @@ import {
 	sync_profile_content,
 } from '@/helpers/servers'
 import type { GameInstance } from '@/helpers/types'
-import { list as list_instances } from '@/helpers/instance'
+import { getInstanceIconUrl, list as list_instances } from '@/helpers/instance'
 import { get_instance_worlds } from '@/helpers/worlds'
 
 const { handleError, pushNotification } = injectNotificationManager()
@@ -113,6 +113,32 @@ const loadingLoaderVersions = ref(false)
 
 const selectedProfile = computed(() =>
 	profiles.value.find((p) => p.id === selectedProfileId.value),
+)
+
+// Combobox options take an icon component rather than an image URL, so wrap
+// each profile's icon in a tiny <img> component.
+function profileIconComponent(iconPath: string | null | undefined) {
+	const src = getInstanceIconUrl(iconPath)
+	if (!src) return undefined
+	return defineComponent({
+		name: 'ProfileOptionIcon',
+		render() {
+			return h('img', {
+				src,
+				alt: '',
+				class: 'h-5 w-5 shrink-0 rounded object-cover',
+			})
+		},
+	})
+}
+
+const profileOptions = computed(() =>
+	profiles.value.map((p) => ({
+		value: p.id,
+		label: p.name,
+		subLabel: `${p.loader} ${p.game_version}`,
+		icon: profileIconComponent(p.icon_path),
+	})),
 )
 
 const displayedVersions = computed(() => {
@@ -529,10 +555,11 @@ function serverIconUrl(server: ChocoServer): string | null {
 						<span class="mb-1 block font-semibold text-contrast">Profile</span>
 						<Combobox
 							v-model="selectedProfileId"
-							:options="profiles.map((p) => ({ value: p.id, label: p.name, subLabel: `${p.loader} ${p.game_version}` }))"
+							:options="profileOptions"
 							:display-value="selectedProfile?.name ?? 'Select a profile'"
 							:searchable="profiles.length > 8"
 							placeholder="Select a profile"
+							show-icon-in-selected
 						/>
 						<p v-if="selectedProfile" class="m-0 mt-1 text-xs text-secondary">
 							Server inherits {{ loaderLabels[selectedProfile.loader] }}

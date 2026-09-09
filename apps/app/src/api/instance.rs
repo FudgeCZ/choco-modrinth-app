@@ -28,6 +28,8 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             instance_remove,
             instance_compress,
             instance_decompress,
+            instance_move_profiles,
+            instance_default_profiles_dir,
             instance_get,
             instance_get_many,
             instance_list,
@@ -540,6 +542,22 @@ pub async fn instance_compress(instance_id: &str) -> Result<()> {
 pub async fn instance_decompress(instance_id: &str) -> Result<()> {
     theseus::instance::compress::decompress(instance_id).await?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn instance_move_profiles(
+    instance_ids: Vec<String>,
+    target_dir: String,
+) -> Result<theseus::instance::relocate::MoveProfilesReport> {
+    Ok(
+        theseus::instance::relocate::move_instances_to_dir(instance_ids, target_dir)
+            .await?,
+    )
+}
+
+#[tauri::command]
+pub async fn instance_default_profiles_dir() -> Result<String> {
+    Ok(theseus::instance::relocate::default_profiles_dir().await?)
 }
 
 #[tauri::command]

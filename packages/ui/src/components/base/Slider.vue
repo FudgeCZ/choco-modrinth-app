@@ -58,7 +58,7 @@
 			type="number"
 			:size="size"
 			wrapper-class="slider-value shrink-0"
-			:class="currentValue === null ? 'w-full' : 'w-[65px]'"
+			:class="currentValue === null ? 'w-full' : 'w-20'"
 			:input-class="currentValue === null ? undefined : 'text-center'"
 			:disabled="disabled"
 			:placeholder="placeholder"

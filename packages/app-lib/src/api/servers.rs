@@ -1,11 +1,14 @@
 //! ChocoModrinth local server creator: downloads and manages local Minecraft
 //! servers (jar downloads, EULA, server.properties, start scripts).
 
+use crate::event::emit::{emit_loading, init_loading};
+use crate::event::LoadingBarId;
 use crate::state::{ModLoader, State};
-use crate::util::fetch::{self, DownloadMeta};
+use crate::util::fetch;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use tokio::io::AsyncWriteExt;
 
 const VANILLA_MANIFEST_URL: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
@@ -300,6 +303,7 @@ pub async fn server_loader_versions(
             maven.list
                 .into_iter()
                 .filter(|v| v.starts_with(&format!("{prefix}.")) || v.starts_with(&format!("{prefix}-")))
+                .rev()
                 .map(|v| ServerLoaderVersion {
                     id: v,
                     recommended: false,
@@ -328,6 +332,7 @@ pub async fn server_loader_versions(
             builds
                 .builds
                 .into_iter()
+                .rev()
                 .map(|b| ServerLoaderVersion {
                     id: b.build.to_string(),
                     recommended: false,
@@ -363,26 +368,120 @@ pub async fn server_loader_versions(
     Ok(out)
 }
 
+/// Creates a loading bar for server setup that shows up in the app's
+/// download/notification area (bytes when `total > 0`, indeterminate spinner
+/// when `total == 0`).
+async fn init_server_progress_bar(
+    server_name: &str,
+    total: u64,
+    message: &str,
+) -> crate::Result<LoadingBarId> {
+    init_loading(
+        crate::event::LoadingBarType::ZipExtract {
+            instance_id: String::new(),
+            instance_name: server_name.to_string(),
+        },
+        total as f64,
+        message,
+    )
+    .await
+}
+
+fn count_files_in_dir(path: &Path) -> u64 {
+    let mut count = 0;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                count += count_files_in_dir(&entry_path);
+            } else {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// Downloads a file, reporting progress on a loading bar in the app's
+/// download/notification area. `progress` is `(server_name, message)`; when
+/// the server sends a content length the bar is a byte progress bar,
+/// otherwise it shows as an indeterminate spinner.
 async fn download_to_file(
     state: &State,
     url: &str,
     sha1: Option<&str>,
     dest: &Path,
+    progress: Option<(&str, &str)>,
 ) -> crate::Result<()> {
-    let file = fetch::fetch_file(
-        url,
-        sha1,
-        None::<&DownloadMeta>,
-        None,
-        &state.api_semaphore,
-        &state.pool,
-        None,
-    )
-    .await?;
     if let Some(parent) = dest.parent() {
         crate::util::io::create_dir_all(parent).await?;
     }
-    file.copy_to(dest, &state.io_semaphore).await?;
+
+    // Streamed manually so download progress can be reported; fetch_file
+    // buffers the whole response before it can be read.
+    let _permit = state.api_semaphore.0.acquire().await?;
+    let client = reqwest::Client::new();
+    let mut response = client
+        .get(url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| {
+            crate::util::io::IOError::with_path(std::io::Error::other(e.to_string()), dest)
+        })?;
+    let total = response.content_length().unwrap_or(0);
+
+    let bar = match progress {
+        Some((server_name, message)) => {
+            Some(init_server_progress_bar(server_name, total, message).await?)
+        }
+        None => None,
+    };
+
+    let mut file = tokio::fs::File::create(dest)
+        .await
+        .map_err(|e| crate::util::io::IOError::with_path(e, dest))?;
+    let mut hasher = sha1.map(|_| sha1_smol::Sha1::new());
+
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| {
+            crate::util::io::IOError::with_path(std::io::Error::other(e.to_string()), dest)
+        })?
+    {
+        if let Some(bar) = &bar {
+            if total > 0 {
+                let _ = emit_loading(bar, chunk.len() as f64, None);
+            }
+        }
+        if let Some(hasher) = hasher.as_mut() {
+            hasher.update(&chunk);
+        }
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| crate::util::io::IOError::with_path(e, dest))?;
+    }
+    file.flush()
+        .await
+        .map_err(|e| crate::util::io::IOError::with_path(e, dest))?;
+    drop(bar);
+
+    if let (Some(expected), Some(hasher)) = (sha1, hasher) {
+        let actual = hasher
+            .digest()
+            .bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        if actual != expected {
+            return Err(crate::ErrorKind::InputError(format!(
+                "Downloaded {url} has wrong SHA-1 (expected {expected}, got {actual})"
+            ))
+            .into());
+        }
+    }
+
     Ok(())
 }
 
@@ -408,7 +507,12 @@ fn required_java_version(game_version: &str) -> u32 {
     }
 }
 
-async fn download_vanilla_server(state: &State, game_version: &str, dir: &Path) -> crate::Result<()> {
+async fn download_vanilla_server(
+    state: &State,
+    game_version: &str,
+    dir: &Path,
+    progress: Option<(&str, &str)>,
+) -> crate::Result<()> {
     #[derive(Deserialize)]
     struct Manifest {
         versions: Vec<ManifestVersion>,
@@ -452,6 +556,7 @@ async fn download_vanilla_server(state: &State, game_version: &str, dir: &Path) 
         &version_json.downloads.server.url,
         Some(&version_json.downloads.server.sha1),
         &dir.join("server.jar"),
+        progress,
     )
     .await
 }
@@ -462,6 +567,7 @@ async fn download_fabric_quilt_server(
     game_version: &str,
     loader_version: Option<&str>,
     dir: &Path,
+    progress: Option<(&str, &str)>,
 ) -> crate::Result<String> {
     let (meta, loader_name) = if is_quilt {
         (QUILT_META, "quilt")
@@ -529,7 +635,7 @@ async fn download_fabric_quilt_server(
     let url = format!(
         "{meta}/versions/loader/{game_version}/{loader_version}/{installer}/server/jar"
     );
-    download_to_file(state, &url, None, &dir.join("server.jar")).await?;
+    download_to_file(state, &url, None, &dir.join("server.jar"), progress).await?;
     Ok(format!("{loader_version} (installer {installer})"))
 }
 
@@ -538,6 +644,7 @@ async fn download_paper_server(
     game_version: &str,
     build: Option<&str>,
     dir: &Path,
+    progress: Option<(&str, &str)>,
 ) -> crate::Result<String> {
     #[derive(Deserialize)]
     struct BuildsResponse {
@@ -586,6 +693,7 @@ async fn download_paper_server(
         &chosen.downloads.application.url,
         None,
         &dir.join(&chosen.downloads.application.name),
+        progress,
     )
     .await?;
     Ok(chosen.downloads.application.name)
@@ -596,6 +704,7 @@ async fn download_purpur_server(
     game_version: &str,
     build: Option<&str>,
     dir: &Path,
+    progress: Option<(&str, &str)>,
 ) -> crate::Result<String> {
     #[derive(Deserialize)]
     struct PurpurVersion {
@@ -620,7 +729,7 @@ async fn download_purpur_server(
     let build = build.unwrap_or(&version.builds.latest).to_string();
     let url = format!("{PURPUR_API}/{game_version}/{build}/download");
     let file_name = format!("purpur-{game_version}-{build}.jar");
-    download_to_file(state, &url, None, &dir.join(&file_name)).await?;
+    download_to_file(state, &url, None, &dir.join(&file_name), progress).await?;
     Ok(file_name)
 }
 
@@ -657,6 +766,7 @@ async fn download_forge_server(
     forge_version: Option<&str>,
     java_path: &Path,
     dir: &Path,
+    server_name: &str,
 ) -> crate::Result<String> {
     #[derive(Deserialize)]
     struct Promotions {
@@ -686,8 +796,15 @@ async fn download_forge_server(
 
     let installer_name = format!("forge-{game_version}-{forge_version}-installer.jar");
     let url = format!("{FORGE_MAVEN}/{game_version}-{forge_version}/{installer_name}");
-    download_to_file(state, &url, None, &dir.join(&installer_name)).await?;
+    download_to_file(state, &url, None, &dir.join(&installer_name), None).await?;
+    let bar = init_server_progress_bar(
+        server_name,
+        0,
+        "Running the Forge installer (this can take a minute)...",
+    )
+    .await?;
     run_installer(dir, java_path, &installer_name).await?;
+    drop(bar);
     let _ = std::fs::remove_file(dir.join(&installer_name));
     Ok(forge_version)
 }
@@ -698,6 +815,7 @@ async fn download_neoforge_server(
     neoforge_version: Option<&str>,
     java_path: &Path,
     dir: &Path,
+    server_name: &str,
 ) -> crate::Result<String> {
     let neoforge_version = match neoforge_version {
         Some(v) => v.to_string(),
@@ -738,8 +856,15 @@ async fn download_neoforge_server(
 
     let installer_name = format!("neoforge-{neoforge_version}-installer.jar");
     let url = format!("{NEOFORGE_MAVEN}/{neoforge_version}/{installer_name}");
-    download_to_file(state, &url, None, &dir.join(&installer_name)).await?;
+    download_to_file(state, &url, None, &dir.join(&installer_name), None).await?;
+    let bar = init_server_progress_bar(
+        server_name,
+        0,
+        "Running the NeoForge installer (this can take a minute)...",
+    )
+    .await?;
     run_installer(dir, java_path, &installer_name).await?;
+    drop(bar);
     let _ = std::fs::remove_file(dir.join(&installer_name));
     Ok(neoforge_version)
 }
@@ -842,37 +967,49 @@ pub async fn create_server(opts: CreateServerOptions) -> crate::Result<ChocoServ
 
     let (jar_file, resolved_loader_version) = match opts.loader {
         ServerLoader::Vanilla => {
-            download_vanilla_server(&state, &opts.game_version, &dir).await?;
+            let message = format!("Downloading Minecraft {} server...", opts.game_version);
+            let progress = (opts.name.as_str(), message.as_str());
+            download_vanilla_server(&state, &opts.game_version, &dir, Some(progress)).await?;
             ("server.jar".to_string(), None)
         }
         ServerLoader::Fabric => {
+            let message = format!("Downloading Fabric {} server...", opts.game_version);
+            let progress = (opts.name.as_str(), message.as_str());
             let version =
-                download_fabric_quilt_server(&state, false, &opts.game_version, opts.loader_version.as_deref(), &dir)
+                download_fabric_quilt_server(&state, false, &opts.game_version, opts.loader_version.as_deref(), &dir, Some(progress))
                     .await?;
             ("server.jar".to_string(), Some(version))
         }
         ServerLoader::Quilt => {
+            let message = format!("Downloading Quilt {} server...", opts.game_version);
+            let progress = (opts.name.as_str(), message.as_str());
             let version =
-                download_fabric_quilt_server(&state, true, &opts.game_version, opts.loader_version.as_deref(), &dir)
+                download_fabric_quilt_server(&state, true, &opts.game_version, opts.loader_version.as_deref(), &dir, Some(progress))
                     .await?;
             ("server.jar".to_string(), Some(version))
         }
         ServerLoader::Paper => {
+            let message = format!("Downloading Paper {} server...", opts.game_version);
+            let progress = (opts.name.as_str(), message.as_str());
             let file = download_paper_server(
                 &state,
                 &opts.game_version,
                 opts.loader_version.as_deref(),
                 &dir,
+                Some(progress),
             )
             .await?;
             (file, opts.loader_version.clone())
         }
         ServerLoader::Purpur => {
+            let message = format!("Downloading Purpur {} server...", opts.game_version);
+            let progress = (opts.name.as_str(), message.as_str());
             let file = download_purpur_server(
                 &state,
                 &opts.game_version,
                 opts.loader_version.as_deref(),
                 &dir,
+                Some(progress),
             )
             .await?;
             (file, opts.loader_version.clone())
@@ -884,6 +1021,7 @@ pub async fn create_server(opts: CreateServerOptions) -> crate::Result<ChocoServ
                 opts.loader_version.as_deref(),
                 &java_path,
                 &dir,
+                &opts.name,
             )
             .await?;
             (String::new(), Some(version))
@@ -895,6 +1033,7 @@ pub async fn create_server(opts: CreateServerOptions) -> crate::Result<ChocoServ
                 opts.loader_version.as_deref(),
                 &java_path,
                 &dir,
+                &opts.name,
             )
             .await?;
             (String::new(), Some(version))
@@ -1014,7 +1153,15 @@ pub async fn create_server_from_profile(
     if let Some(save) = &save_name {
         let source = instance_dir.join("saves").join(save);
         if source.is_dir() {
-            copy_dir_all(&source, &server_dir.join(save)).await?;
+            let total = count_files_in_dir(&source);
+            let bar = init_server_progress_bar(
+                &server.name,
+                total,
+                "Copying the world save...",
+            )
+            .await?;
+            copy_dir_all(&source, &server_dir.join(save), Some(&bar)).await?;
+            drop(bar);
         }
     }
 
@@ -1083,7 +1230,15 @@ async fn sync_profile_content(
                     .await
                     .map_err(|e| crate::util::io::IOError::with_path(e, &config_dest))?;
             }
-            copy_dir_all(&config_src, &config_dest).await?;
+            let total = count_files_in_dir(&config_src);
+            let bar = init_server_progress_bar(
+                &server.name,
+                total,
+                "Copying the config folder...",
+            )
+            .await?;
+            copy_dir_all(&config_src, &config_dest, Some(&bar)).await?;
+            drop(bar);
             report.config_copied = true;
         }
     }
@@ -1161,6 +1316,12 @@ async fn sync_profile_content(
             }
 
             // Ask Modrinth which projects are client-side only
+            let check_bar = init_server_progress_bar(
+                &server.name,
+                0,
+                "Checking which mods are client-only (via Modrinth)...",
+            )
+            .await?;
             let mut client_only: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
             if !project_ids.is_empty() {
@@ -1193,6 +1354,7 @@ async fn sync_profile_content(
                     }
                 }
             }
+            drop(check_bar);
 
             for (path, project_id) in file_projects {
                 if client_only.contains(&project_id) {
@@ -1202,6 +1364,12 @@ async fn sync_profile_content(
                 }
             }
 
+            let copy_bar = init_server_progress_bar(
+                &server.name,
+                allowed_files.len() as u64,
+                "Copying mods...",
+            )
+            .await?;
             for file in allowed_files {
                 let file_name = file
                     .file_name()
@@ -1211,18 +1379,22 @@ async fn sync_profile_content(
                 tokio::fs::copy(&file, &dest)
                     .await
                     .map_err(|e| crate::util::io::IOError::with_path(e, &file))?;
+                let _ = emit_loading(&copy_bar, 1.0, None);
                 report.mods_copied += 1;
             }
+            drop(copy_bar);
         }
     }
 
     Ok(report)
 }
 
-/// Recursively copies a directory, overwriting existing files
+/// Recursively copies a directory, overwriting existing files. Each copied
+/// file ticks the progress bar (when one is given).
 pub fn copy_dir_all<'a>(
     src: &'a Path,
     dest: &'a Path,
+    bar: Option<&'a LoadingBarId>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = crate::Result<()>> + Send + 'a>> {
     Box::pin(async move {
         if !src.is_dir() {
@@ -1242,11 +1414,14 @@ pub fn copy_dir_all<'a>(
             let target = dest.join(entry.file_name());
             let source = entry.path();
             if source.is_dir() {
-                copy_dir_all(&source, &target).await?;
+                copy_dir_all(&source, &target, bar).await?;
             } else {
                 tokio::fs::copy(&source, &target)
                     .await
                     .map_err(|e| crate::util::io::IOError::with_path(e, &source))?;
+                if let Some(bar) = bar {
+                    let _ = emit_loading(bar, 1.0, None);
+                }
             }
         }
         Ok(())

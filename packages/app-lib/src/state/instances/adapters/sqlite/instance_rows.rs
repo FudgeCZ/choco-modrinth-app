@@ -801,6 +801,19 @@ pub(crate) async fn set_instance_compressed(
     Ok(())
 }
 
+pub(crate) async fn set_instance_path(
+    instance_id: &str,
+    path: &str,
+    pool: &SqlitePool,
+) -> crate::Result<()> {
+    sqlx::query("UPDATE instances SET path = ? WHERE id = ?")
+        .bind(path)
+        .bind(instance_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub(crate) async fn update_instance_icon_if_empty(
     instance_id: &str,
     icon_path: &str,

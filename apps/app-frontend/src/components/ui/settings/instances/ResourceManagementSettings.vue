@@ -6,6 +6,7 @@ import {
 	IconButton,
 	injectNotificationManager,
 	Input,
+	NewModal,
 	Slider,
 	Toggle,
 	useVIntl,
@@ -16,6 +17,11 @@ import { ref, watch } from 'vue'
 import ConfirmModalWrapper from '@/components/ui/modal/ConfirmModalWrapper.vue'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { purge_cache_types } from '@/helpers/cache.js'
+import {
+	default_profiles_dir,
+	list as list_instances,
+	move_profiles,
+} from '@/helpers/instance'
 import { get, set } from '@/helpers/settings.ts'
 import { showAppDbBackupsFolder } from '@/helpers/utils.js'
 
@@ -26,6 +32,17 @@ const settings = ref(await get())
 const purgeCacheConfirmModal = ref(null)
 const alwaysShowCopyDetailsFlag = 'always_show_copy_details'
 
+const moveModal = ref(null)
+const moving = ref(false)
+const defaultProfilesDir = ref('')
+const pendingDir = ref('')
+const pendingReset = ref(false)
+const moveCandidates = ref([])
+
+default_profiles_dir()
+	.then((dir) => (defaultProfilesDir.value = dir))
+	.catch(() => {})
+
 const messages = defineMessages({
 	appDirectoryTitle: {
 		id: 'app.settings.resource-management.app-directory.title',
@@ -35,6 +52,56 @@ const messages = defineMessages({
 		id: 'app.settings.resource-management.app-directory.description',
 		defaultMessage:
 			'Where ChocoModrinth stores instances and other files. Changes take effect after restarting the app.',
+	},
+	profilesFolderTitle: {
+		id: 'app.settings.resource-management.profiles-folder.title',
+		defaultMessage: 'Profiles folder',
+	},
+	profilesFolderDescription: {
+		id: 'app.settings.resource-management.profiles-folder.description',
+		defaultMessage:
+			'Where new profiles are created. You can also move existing profiles here; moved profiles keep their settings and content.',
+	},
+	defaultProfilesFolder: {
+		id: 'app.settings.resource-management.profiles-folder.default',
+		defaultMessage: 'Default (in the app data folder)',
+	},
+	selectProfilesFolder: {
+		id: 'app.settings.resource-management.profiles-folder.select',
+		defaultMessage: 'Select a profiles folder',
+	},
+	browseProfilesFolder: {
+		id: 'app.settings.resource-management.profiles-folder.browse',
+		defaultMessage: 'Browse for a profiles folder',
+	},
+	resetProfilesFolder: {
+		id: 'app.settings.resource-management.profiles-folder.reset',
+		defaultMessage: 'Reset to default',
+	},
+	moveModalHeader: {
+		id: 'app.settings.resource-management.profiles-folder.move-modal-header',
+		defaultMessage: 'Change profiles folder',
+	},
+	moveProfilesDescription: {
+		id: 'app.settings.resource-management.profiles-folder.move-description',
+		defaultMessage:
+			'Select which profiles to move to the new folder. Unselected profiles stay where they are and keep working.',
+	},
+	noProfilesToMove: {
+		id: 'app.settings.resource-management.profiles-folder.no-profiles',
+		defaultMessage: 'No profiles to move.',
+	},
+	moveSelected: {
+		id: 'app.settings.resource-management.profiles-folder.move-selected',
+		defaultMessage: 'Move selected',
+	},
+	setLocationOnly: {
+		id: 'app.settings.resource-management.profiles-folder.set-only',
+		defaultMessage: 'Set without moving',
+	},
+	cancel: {
+		id: 'app.settings.resource-management.profiles-folder.cancel',
+		defaultMessage: 'Cancel',
 	},
 	selectAppDirectory: {
 		id: 'app.settings.resource-management.app-directory.select',
@@ -168,6 +235,62 @@ async function findLauncherDir() {
 		settings.value.custom_dir = newDir
 	}
 }
+
+async function browseProfilesDir() {
+	const newDir = await open({
+		multiple: false,
+		directory: true,
+		title: formatMessage(messages.selectProfilesFolder),
+	})
+
+	if (newDir) {
+		await showMoveModal(newDir, false)
+	}
+}
+
+async function resetProfilesDir() {
+	await showMoveModal(defaultProfilesDir.value, true)
+}
+
+async function showMoveModal(dir, isReset) {
+	pendingDir.value = dir
+	pendingReset.value = isReset
+	try {
+		const instances = await list_instances()
+		moveCandidates.value = instances.map((instance) => ({
+			id: instance.id,
+			name: instance.name,
+			selected: true,
+		}))
+	} catch (error) {
+		moveCandidates.value = []
+		handleError(error)
+	}
+	moveModal.value?.show()
+}
+
+async function confirmMove(moveSelected) {
+	moving.value = true
+	try {
+		if (moveSelected) {
+			const ids = moveCandidates.value
+				.filter((candidate) => candidate.selected)
+				.map((candidate) => candidate.id)
+			if (ids.length > 0) {
+				const report = await move_profiles(ids, pendingDir.value)
+				for (const failure of report.failed) {
+					handleError(failure.error)
+				}
+			}
+		}
+		settings.value.custom_profiles_dir = pendingReset.value ? null : pendingDir.value
+		moveModal.value?.hide()
+	} catch (error) {
+		handleError(error)
+	} finally {
+		moving.value = false
+	}
+}
 </script>
 
 <template>
@@ -197,6 +320,71 @@ async function findLauncherDir() {
 			<p class="m-0 leading-tight text-secondary">
 				{{ formatMessage(messages.appDirectoryDescription) }}
 			</p>
+		</div>
+
+		<div class="flex flex-col gap-2.5">
+			<h2 class="m-0 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.profilesFolderTitle) }}
+			</h2>
+			<div class="flex items-center gap-2">
+				<Input
+					id="profilesDir"
+					:model-value="
+						settings.custom_profiles_dir ??
+						(defaultProfilesDir || formatMessage(messages.defaultProfilesFolder))
+					"
+					:icon="FolderOpenIcon"
+					type="text"
+					wrapper-class="w-full"
+					disabled
+				>
+					<template #right>
+						<IconButton
+							v-tooltip="formatMessage(messages.browseProfilesFolder)"
+							:label="formatMessage(messages.browseProfilesFolder)"
+							class="ml-1.5"
+							@click="browseProfilesDir"
+						>
+							<FolderSearchIcon aria-hidden="true" />
+						</IconButton>
+					</template>
+				</Input>
+				<Button v-if="settings.custom_profiles_dir" @click="resetProfilesDir">
+					{{ formatMessage(messages.resetProfilesFolder) }}
+				</Button>
+			</div>
+			<p class="m-0 leading-tight text-secondary">
+				{{ formatMessage(messages.profilesFolderDescription) }}
+			</p>
+
+			<NewModal ref="moveModal" :header="formatMessage(messages.moveModalHeader)">
+				<div class="flex max-h-[26rem] flex-col gap-3">
+					<p class="m-0 text-secondary">
+						{{ formatMessage(moveCandidates.length > 0 ? messages.moveProfilesDescription : messages.noProfilesToMove) }}
+					</p>
+					<div class="flex max-h-64 flex-col gap-1 overflow-y-auto">
+						<label
+							v-for="candidate in moveCandidates"
+							:key="candidate.id"
+							class="flex cursor-pointer items-center gap-2 rounded-xl p-1.5 hover:bg-surface-3"
+						>
+							<Toggle v-model="candidate.selected" />
+							<span class="text-contrast">{{ candidate.name }}</span>
+						</label>
+					</div>
+					<div class="flex items-center justify-end gap-2">
+						<Button @click="moveModal?.hide()">
+							{{ formatMessage(messages.cancel) }}
+						</Button>
+						<Button :disabled="moving" @click="confirmMove(false)">
+							{{ formatMessage(messages.setLocationOnly) }}
+						</Button>
+						<Button color="brand" :loading="moving" @click="confirmMove(true)">
+							{{ formatMessage(messages.moveSelected) }}
+						</Button>
+					</div>
+				</div>
+			</NewModal>
 		</div>
 
 		<div class="flex items-center justify-between gap-4">

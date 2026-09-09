@@ -36,6 +36,22 @@ export async function decompress_instance(instanceId: string): Promise<void> {
 	return await invoke('plugin:instance|instance_decompress', { instanceId })
 }
 
+export type MoveProfilesReport = {
+	moved: { instance_id: string; name: string; new_path: string }[]
+	failed: { instance_id: string; name: string; error: string }[]
+}
+
+export async function move_profiles(
+	instanceIds: string[],
+	targetDir: string,
+): Promise<MoveProfilesReport> {
+	return await invoke('plugin:instance|instance_move_profiles', { instanceIds, targetDir })
+}
+
+export async function default_profiles_dir(): Promise<string> {
+	return await invoke('plugin:instance|instance_default_profiles_dir')
+}
+
 export async function get(instanceId: string): Promise<GameInstance | null> {
 	return await invoke('plugin:instance|instance_get', { instanceId })
 }

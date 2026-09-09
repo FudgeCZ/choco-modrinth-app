@@ -206,6 +206,8 @@ fn main() {
                         "instance_remove",
                         "instance_compress",
                         "instance_decompress",
+                        "instance_move_profiles",
+                        "instance_default_profiles_dir",
                         "instance_get",
                         "instance_get_many",
                         "instance_get_projects",

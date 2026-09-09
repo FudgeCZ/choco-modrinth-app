@@ -154,16 +154,42 @@ pub(crate) async fn create_instance(
     result
 }
 
+/// Resolves the folder name and full path for a new instance. When a custom
+/// profiles directory is set in settings, new instances are created there and
+/// the stored path is absolute; otherwise the path is relative to the default
+/// profiles directory.
 async fn resolve_instance_path(
     name: &str,
     path: Option<&str>,
     state: &State,
 ) -> crate::Result<(String, std::path::PathBuf)> {
+    let settings = crate::state::Settings::get(&state.pool).await?;
+    let custom_root = settings
+        .custom_profiles_dir
+        .as_deref()
+        .map(std::path::PathBuf::from);
+    let root = match &custom_root {
+        Some(root) => {
+            tokio::fs::create_dir_all(root)
+                .await
+                .map_err(|e| crate::util::io::IOError::with_path(e, root))?;
+            Some(root.clone())
+        }
+        None => None,
+    };
+
     let base_path = path
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| sanitize_instance_name(name));
     let mut path = base_path.clone();
-    let mut full_path = state.directories.instances_dir().join(&path);
+    let mut full_path = match &root {
+        Some(root) => root.join(&path),
+        None => state.directories.instances_dir().join(&path),
+    };
+    if root.is_some() {
+        // Paths in the custom directory are stored absolute
+        path = full_path.to_string_lossy().to_string();
+    }
 
     if path_available(&path, &full_path, state).await? {
         return Ok((path, full_path));
@@ -172,7 +198,13 @@ async fn resolve_instance_path(
     let mut which = 1;
     loop {
         path = format!("{base_path} ({which})");
-        full_path = state.directories.instances_dir().join(&path);
+        full_path = match &root {
+            Some(root) => root.join(&path),
+            None => state.directories.instances_dir().join(&path),
+        };
+        if root.is_some() {
+            path = full_path.to_string_lossy().to_string();
+        }
 
         if path_available(&path, &full_path, state).await? {
             return Ok((path, full_path));

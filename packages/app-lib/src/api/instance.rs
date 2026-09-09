@@ -11,6 +11,7 @@ mod install;
 mod lifecycle;
 mod paths;
 mod projects;
+pub mod relocate;
 mod run;
 mod screenshot_groups;
 mod screenshots;
