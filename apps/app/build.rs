@@ -469,6 +469,9 @@ fn main() {
                         "servers_is_running",
                         "servers_sync_profile_content",
                         "servers_open_folder",
+                        "servers_move",
+                        "servers_default_dir",
+                        "servers_accept_eula",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

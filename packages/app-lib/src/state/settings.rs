@@ -49,6 +49,8 @@ pub struct Settings {
     pub migrated: bool,
     #[serde(default)]
     pub custom_profiles_dir: Option<String>,
+    #[serde(default)]
+    pub custom_servers_dir: Option<String>,
 
     pub developer_mode: bool,
     pub feature_flags: HashMap<FeatureFlag, bool>,
@@ -107,7 +109,7 @@ impl Settings {
                 json(extra_launch_args) extra_launch_args, json(custom_env_vars) custom_env_vars,
                 mc_memory_max, mc_force_fullscreen, mc_game_resolution_x, mc_game_resolution_y, hide_on_process_start,
                 hook_pre_launch, hook_wrapper, hook_post_exit,
-                custom_dir, prev_custom_dir, migrated, custom_profiles_dir, json(feature_flags) feature_flags, toggle_sidebar,
+                custom_dir, prev_custom_dir, migrated, custom_profiles_dir, custom_servers_dir, json(feature_flags) feature_flags, toggle_sidebar,
                 skipped_update, pending_update_toast_for_version, auto_download_updates,
 				sync_theme_across_devices, sync_behavior_across_devices, sync_features_across_devices,
 				show_files_tab_in_instances, show_worlds_tab_in_instances,
@@ -162,6 +164,7 @@ impl Settings {
             prev_custom_dir: res.prev_custom_dir,
             migrated: res.migrated == 1,
             custom_profiles_dir: res.custom_profiles_dir,
+            custom_servers_dir: res.custom_servers_dir,
             feature_flags: res
                 .feature_flags
                 .as_ref()
@@ -250,7 +253,8 @@ impl Settings {
 				show_skin_selector_in_sidebar = $38,
 
 				version = $39,
-				custom_profiles_dir = $40
+				custom_profiles_dir = $40,
+				custom_servers_dir = $41
             ",
             max_concurrent_writes,
             max_concurrent_downloads,
@@ -292,6 +296,7 @@ impl Settings {
             self.show_skin_selector_in_sidebar,
             version,
             self.custom_profiles_dir,
+            self.custom_servers_dir,
         )
         .execute(exec)
         .await?;

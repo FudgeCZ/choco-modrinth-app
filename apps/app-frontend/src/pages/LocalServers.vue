@@ -25,6 +25,7 @@ import { computed, defineComponent, h, onMounted, ref, useTemplateRef, watch } f
 
 import {
 	type ChocoServer,
+	accept_server_eula,
 	create_server,
 	create_server_from_profile,
 	delete_server,
@@ -286,25 +287,27 @@ async function submitCreate() {
 		message: 'Preparing...',
 		progress: null,
 	}
+	// Snapshot options before resetting the form fields below
+	const options = {
+		name: entry.name,
+		game_version: gameVersion.value,
+		loader: selectedLoader.value,
+		loader_version: loaderVersion.value || null,
+		ram_mb: ramMb.value,
+		port: port.value,
+		motd: motd.value,
+		difficulty: difficulty.value,
+		gamemode: gamemode.value,
+		max_players: maxPlayers.value,
+		online_mode: onlineMode.value,
+		accept_eula: acceptEula.value,
+	}
 	creatingServers.value.push(entry)
 	createModal.value?.hide()
 	name.value = ''
 	acceptEula.value = false
 	try {
-		const server = await create_server({
-			name: entry.name,
-			game_version: gameVersion.value,
-			loader: selectedLoader.value,
-			loader_version: loaderVersion.value || null,
-			ram_mb: ramMb.value,
-			port: port.value,
-			motd: motd.value,
-			difficulty: difficulty.value,
-			gamemode: gamemode.value,
-			max_players: maxPlayers.value,
-			online_mode: onlineMode.value,
-			accept_eula: acceptEula.value,
-		})
+		const server = await create_server(options)
 		highlightId.value = server.id
 		await refresh()
 	} catch (error) {
@@ -326,19 +329,21 @@ async function submitCreateFromProfile() {
 		message: 'Preparing...',
 		progress: null,
 	}
+	// Snapshot options before resetting the form fields below
+	const options = {
+		instanceId: selectedProfile.value.id,
+		saveName: selectedSave.value,
+		copyMods: copyMods.value,
+		copyConfig: copyConfig.value,
+		acceptEula: acceptEula.value,
+		ramMb: ramMb.value,
+		port: port.value,
+	}
 	creatingServers.value.push(entry)
 	createModal.value?.hide()
 	acceptEula.value = false
 	try {
-		const server = await create_server_from_profile({
-			instanceId: selectedProfile.value.id,
-			saveName: selectedSave.value,
-			copyMods: copyMods.value,
-			copyConfig: copyConfig.value,
-			acceptEula: acceptEula.value,
-			ramMb: ramMb.value,
-			port: port.value,
-		})
+		const server = await create_server_from_profile(options)
 		highlightId.value = server.id
 		runningServers.value[server.id] = false
 		await refresh()
@@ -415,6 +420,30 @@ function formatConsole(serverId: string): string {
 function serverIconUrl(server: ChocoServer): string | null {
 	return server.icon_file ? convertFileSrc(server.icon_file) : null
 }
+
+const dashboardModal = useTemplateRef('dashboardModal')
+const dashboardServer = ref<ChocoServer | null>(null)
+
+function openDashboard(server: ChocoServer) {
+	dashboardServer.value = server
+	dashboardModal.value?.show()
+}
+
+function toggleRunDashboard() {
+	if (dashboardServer.value) void toggleRun(dashboardServer.value)
+}
+
+async function acceptEulaFor(server: ChocoServer) {
+	try {
+		await accept_server_eula(server.id)
+		await refresh()
+		if (dashboardServer.value?.id === server.id) {
+			dashboardServer.value = { ...dashboardServer.value, eula_accepted: true }
+		}
+	} catch (error) {
+		handleError(error)
+	}
+}
 </script>
 
 <template>
@@ -489,12 +518,13 @@ function serverIconUrl(server: ChocoServer): string | null {
 			<div
 				v-for="server in servers"
 				:key="server.id"
-				class="rounded-2xl border-0 border-solid p-4 bg-surface-2"
+				class="cursor-pointer rounded-2xl border-0 border-solid p-4 transition-colors bg-surface-2 hover:bg-surface-3"
 				:class="
 					highlightId === server.id
 						? 'border-2 border-brand shadow-[0_0_12px_var(--color-brand-shadow)]'
 						: 'border-divider'
 				"
+				@click="openDashboard(server)"
 			>
 				<div class="flex flex-wrap items-center gap-3">
 					<img
@@ -513,11 +543,16 @@ function serverIconUrl(server: ChocoServer): string | null {
 							· {{ server.ram_mb }} MB RAM · port {{ server.port }}
 						</p>
 					</div>
-					<div class="flex items-center gap-2">
+					<div class="flex items-center gap-2" @click.stop>
 						<Button
+							v-if="!server.eula_accepted"
+							@click="acceptEulaFor(server)"
+						>
+							Accept EULA
+						</Button>
+						<Button
+							v-else
 							:color="runningServers[server.id] ? 'red' : 'brand'"
-							:disabled="!server.eula_accepted"
-							:title="server.eula_accepted ? undefined : 'EULA not accepted'"
 							@click="toggleRun(server)"
 						>
 							<StopCircleIcon v-if="runningServers[server.id]" aria-hidden="true" />
@@ -535,6 +570,7 @@ function serverIconUrl(server: ChocoServer): string | null {
 				<div
 					v-if="server.linked_instance_id"
 					class="mt-3 flex flex-wrap items-center gap-2"
+					@click.stop
 				>
 					<span class="text-xs text-secondary">
 						Linked to a profile — re-sync to pick up updated mods and config.
@@ -547,6 +583,7 @@ function serverIconUrl(server: ChocoServer): string | null {
 				<pre
 					v-if="serverConsoleLines[server.id]?.length"
 					class="mt-3 max-h-40 overflow-auto rounded-xl bg-surface-4 p-3 text-xs whitespace-pre-wrap text-secondary"
+					@click.stop
 					>{{ formatConsole(server.id) }}</pre
 				>
 			</div>
@@ -768,5 +805,96 @@ function serverIconUrl(server: ChocoServer): string | null {
 			proceed-label="Delete"
 			@proceed="doDelete"
 		/>
+
+		<NewModal
+			ref="dashboardModal"
+			:header="dashboardServer?.name ?? 'Server'"
+			class="!w-[44rem]"
+		>
+			<div v-if="dashboardServer" class="flex flex-col gap-4">
+				<div class="flex items-center gap-3">
+					<img
+						v-if="dashboardServer.icon_file"
+						:src="serverIconUrl(dashboardServer)"
+						:alt="dashboardServer.name"
+						class="size-14 rounded-xl object-cover"
+					/>
+					<div
+						v-else
+						class="flex size-14 items-center justify-center rounded-xl bg-surface-3"
+					>
+						<SpinnerIcon v-if="runningServers[dashboardServer.id]" class="size-6 animate-spin text-brand" />
+						<ArchiveIcon v-else class="size-6 text-secondary" />
+					</div>
+					<div class="flex min-w-0 flex-1 flex-col">
+						<p class="m-0 text-lg font-bold text-contrast">
+							{{ dashboardServer.name }}
+						</p>
+						<p class="m-0 text-sm text-secondary">
+							{{ loaderLabels[dashboardServer.loader] }} {{ dashboardServer.game_version }}
+							<template v-if="dashboardServer.loader_version">
+								· {{ dashboardServer.loader_version }}</template
+							>
+						</p>
+					</div>
+					<div class="flex items-center gap-2">
+						<Button icon-only @click="openFolder(dashboardServer)">
+							<FolderOpenIcon aria-hidden="true" />
+						</Button>
+						<Button
+							v-if="!dashboardServer.eula_accepted"
+							@click="acceptEulaFor(dashboardServer)"
+						>
+							Accept EULA
+						</Button>
+						<Button
+							v-else
+							:color="runningServers[dashboardServer.id] ? 'red' : 'brand'"
+							@click="toggleRunDashboard"
+						>
+							<StopCircleIcon
+								v-if="runningServers[dashboardServer.id]"
+								aria-hidden="true"
+							/>
+							<PlayIcon v-else aria-hidden="true" />
+							{{ runningServers[dashboardServer.id] ? 'Stop' : 'Run' }}
+						</Button>
+					</div>
+				</div>
+
+				<div class="grid grid-cols-2 gap-2 text-sm">
+					<div class="rounded-xl bg-surface-3 p-3">
+						<span class="text-secondary">RAM</span>
+						<p class="m-0 font-semibold text-contrast">
+							{{ (dashboardServer.ram_mb / 1024).toFixed(0) }} GB
+						</p>
+					</div>
+					<div class="rounded-xl bg-surface-3 p-3">
+						<span class="text-secondary">Port</span>
+						<p class="m-0 font-semibold text-contrast">{{ dashboardServer.port }}</p>
+					</div>
+					<div class="rounded-xl bg-surface-3 p-3">
+						<span class="text-secondary">Linked profile</span>
+						<p class="m-0 font-semibold text-contrast">
+							{{ dashboardServer.linked_instance_id ? 'Yes' : 'No' }}
+						</p>
+					</div>
+					<div class="rounded-xl bg-surface-3 p-3">
+						<span class="text-secondary">Status</span>
+						<p class="m-0 font-semibold text-contrast">
+							{{ runningServers[dashboardServer.id] ? 'Running' : 'Stopped' }}
+						</p>
+					</div>
+				</div>
+
+				<div>
+					<p class="mb-1 text-sm font-semibold text-contrast">Console</p>
+					<pre
+						class="h-64 overflow-auto rounded-xl bg-surface-4 p-3 text-xs whitespace-pre-wrap text-secondary"
+						>{{ formatConsole(dashboardServer.id) || 'Console output appears here while the server is running.' }}</pre
+					>
+				</div>
+			</div>
+		</NewModal>
 	</div>
 </template>

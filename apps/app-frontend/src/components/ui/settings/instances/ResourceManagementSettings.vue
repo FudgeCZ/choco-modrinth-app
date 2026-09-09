@@ -17,11 +17,12 @@ import { ref, watch } from 'vue'
 import ConfirmModalWrapper from '@/components/ui/modal/ConfirmModalWrapper.vue'
 import { useAppSettings } from '@/composables/use-app-settings.ts'
 import { purge_cache_types } from '@/helpers/cache.js'
+import { default_profiles_dir, list as list_instances, move_profiles } from '@/helpers/instance'
 import {
-	default_profiles_dir,
-	list as list_instances,
-	move_profiles,
-} from '@/helpers/instance'
+	default_servers_dir as get_default_servers_dir,
+	list_servers,
+	move_servers,
+} from '@/helpers/servers'
 import { get, set } from '@/helpers/settings.ts'
 import { showAppDbBackupsFolder } from '@/helpers/utils.js'
 
@@ -35,12 +36,17 @@ const alwaysShowCopyDetailsFlag = 'always_show_copy_details'
 const moveModal = ref(null)
 const moving = ref(false)
 const defaultProfilesDir = ref('')
+const defaultServersDir = ref('')
 const pendingDir = ref('')
 const pendingReset = ref(false)
+const moveKind = ref('profiles')
 const moveCandidates = ref([])
 
 default_profiles_dir()
 	.then((dir) => (defaultProfilesDir.value = dir))
+	.catch(() => {})
+get_default_servers_dir()
+	.then((dir) => (defaultServersDir.value = dir))
 	.catch(() => {})
 
 const messages = defineMessages({
@@ -82,9 +88,47 @@ const messages = defineMessages({
 		id: 'app.settings.resource-management.profiles-folder.move-button',
 		defaultMessage: 'Move profiles…',
 	},
+	serversFolderTitle: {
+		id: 'app.settings.resource-management.servers-folder.title',
+		defaultMessage: 'Servers folder',
+	},
+	serversFolderDescription: {
+		id: 'app.settings.resource-management.servers-folder.description',
+		defaultMessage:
+			'Where new local servers are created. You can also move existing servers here; moved servers keep their configuration and worlds.',
+	},
+	defaultServersFolder: {
+		id: 'app.settings.resource-management.servers-folder.default',
+		defaultMessage: 'Default (in the app data folder)',
+	},
+	selectServersFolder: {
+		id: 'app.settings.resource-management.servers-folder.select',
+		defaultMessage: 'Select a servers folder',
+	},
+	browseServersFolder: {
+		id: 'app.settings.resource-management.servers-folder.browse',
+		defaultMessage: 'Browse for a servers folder',
+	},
+	resetServersFolder: {
+		id: 'app.settings.resource-management.servers-folder.reset',
+		defaultMessage: 'Reset to default',
+	},
+	moveServersButton: {
+		id: 'app.settings.resource-management.servers-folder.move-button',
+		defaultMessage: 'Move servers…',
+	},
 	moveModalHeader: {
 		id: 'app.settings.resource-management.profiles-folder.move-modal-header',
 		defaultMessage: 'Change profiles folder',
+	},
+	moveModalHeaderServers: {
+		id: 'app.settings.resource-management.servers-folder.move-modal-header',
+		defaultMessage: 'Change servers folder',
+	},
+	moveServersDescription: {
+		id: 'app.settings.resource-management.servers-folder.move-description',
+		defaultMessage:
+			'Select which servers to move to the new folder. Running servers are skipped; unselected servers stay where they are.',
 	},
 	moveProfilesDescription: {
 		id: 'app.settings.resource-management.profiles-folder.move-description',
@@ -262,17 +306,44 @@ async function moveMoreProfiles() {
 		handleError('No profiles folder is set')
 		return
 	}
-	await showMoveModal(target, false)
+	await showMoveModal(target, false, 'profiles')
 }
 
-async function showMoveModal(dir, isReset) {
+async function browseServersDir() {
+	const newDir = await open({
+		multiple: false,
+		directory: true,
+		title: formatMessage(messages.selectServersFolder),
+	})
+
+	if (newDir) {
+		await showMoveModal(newDir, false, 'servers')
+	}
+}
+
+async function resetServersDir() {
+	await showMoveModal(defaultServersDir.value, true, 'servers')
+}
+
+async function moveMoreServers() {
+	const target = settings.value.custom_servers_dir || defaultServersDir.value
+	if (!target) {
+		handleError('No servers folder is set')
+		return
+	}
+	await showMoveModal(target, false, 'servers')
+}
+
+async function showMoveModal(dir, isReset, kind = 'profiles') {
 	pendingDir.value = dir
 	pendingReset.value = isReset
+	moveKind.value = kind
 	try {
-		const instances = await list_instances()
-		moveCandidates.value = instances.map((instance) => ({
-			id: instance.id,
-			name: instance.name,
+		const items =
+			moveKind.value === 'servers' ? await list_servers() : await list_instances()
+		moveCandidates.value = items.map((item) => ({
+			id: item.id,
+			name: item.name,
 			selected: true,
 		}))
 	} catch (error) {
@@ -290,7 +361,10 @@ async function confirmMove(moveSelected) {
 				.filter((candidate) => candidate.selected)
 				.map((candidate) => candidate.id)
 			if (ids.length > 0) {
-				const report = await move_profiles(ids, pendingDir.value)
+				const report =
+					moveKind.value === 'servers'
+						? await move_servers(ids, pendingDir.value)
+						: await move_profiles(ids, pendingDir.value)
 				for (const failure of report.failed) {
 					handleError(failure.error)
 				}
@@ -298,7 +372,13 @@ async function confirmMove(moveSelected) {
 		}
 		// Moving into the default folder is equivalent to having no custom folder
 		const keepCustomDir = !pendingReset.value && pendingDir.value !== defaultProfilesDir.value
-		settings.value.custom_profiles_dir = keepCustomDir ? pendingDir.value : null
+		const keepCustomServersDir =
+			!pendingReset.value && pendingDir.value !== defaultServersDir.value
+		if (moveKind.value === 'servers') {
+			settings.value.custom_servers_dir = keepCustomServersDir ? pendingDir.value : null
+		} else {
+			settings.value.custom_profiles_dir = keepCustomDir ? pendingDir.value : null
+		}
 		moveModal.value?.hide()
 	} catch (error) {
 		handleError(error)
@@ -379,10 +459,27 @@ async function confirmMove(moveSelected) {
 				{{ formatMessage(messages.profilesFolderDescription) }}
 			</p>
 
-			<NewModal ref="moveModal" :header="formatMessage(messages.moveModalHeader)">
+			<NewModal
+				ref="moveModal"
+				:header="
+					formatMessage(
+						moveKind === 'servers'
+							? messages.moveModalHeaderServers
+							: messages.moveModalHeader,
+					)
+				"
+			>
 				<div class="flex max-h-[26rem] flex-col gap-3">
 					<p class="m-0 text-secondary">
-						{{ formatMessage(moveCandidates.length > 0 ? messages.moveProfilesDescription : messages.noProfilesToMove) }}
+						{{
+							formatMessage(
+								moveCandidates.length === 0
+									? messages.noProfilesToMove
+									: moveKind === 'servers'
+										? messages.moveServersDescription
+										: messages.moveProfilesDescription,
+							)
+						}}
 					</p>
 					<div class="flex max-h-64 flex-col gap-1 overflow-y-auto">
 						<label
@@ -407,6 +504,49 @@ async function confirmMove(moveSelected) {
 					</div>
 				</div>
 			</NewModal>
+		</div>
+
+		<div class="flex flex-col gap-2.5">
+			<h2 class="m-0 text-lg font-semibold text-contrast">
+				{{ formatMessage(messages.serversFolderTitle) }}
+			</h2>
+			<div class="flex items-center gap-2">
+				<Input
+					id="serversDir"
+					:model-value="
+						settings.custom_servers_dir ??
+						(defaultServersDir || formatMessage(messages.defaultServersFolder))
+					"
+					:icon="FolderOpenIcon"
+					type="text"
+					wrapper-class="w-full"
+					disabled
+				>
+					<template #right>
+						<IconButton
+							v-tooltip="formatMessage(messages.browseServersFolder)"
+							:label="formatMessage(messages.browseServersFolder)"
+							class="ml-1.5"
+							@click="browseServersDir"
+						>
+							<FolderSearchIcon aria-hidden="true" />
+						</IconButton>
+					</template>
+				</Input>
+				<Button
+					v-if="settings.custom_servers_dir"
+					class="shrink-0"
+					@click="resetServersDir"
+				>
+					{{ formatMessage(messages.resetServersFolder) }}
+				</Button>
+				<Button class="shrink-0" @click="moveMoreServers">
+					{{ formatMessage(messages.moveServersButton) }}
+				</Button>
+			</div>
+			<p class="m-0 leading-tight text-secondary">
+				{{ formatMessage(messages.serversFolderDescription) }}
+			</p>
 		</div>
 
 		<div class="flex items-center justify-between gap-4">

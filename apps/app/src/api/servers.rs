@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_opener::OpenerExt;
-use theseus::servers::{ChocoServer, CreateServerOptions, ServerLoader};
+use theseus::servers::{
+    server_dir, ChocoServer, CreateServerOptions, MoveServersReport, ServerLoader,
+};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
@@ -30,6 +32,9 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             servers_stop,
             servers_is_running,
             servers_open_folder,
+            servers_move,
+            servers_default_dir,
+            servers_accept_eula,
         ])
         .build()
 }
@@ -94,6 +99,34 @@ pub async fn servers_is_running(
 }
 
 #[tauri::command]
+pub async fn servers_accept_eula(server_id: String) -> Result<()> {
+    theseus::servers::accept_server_eula(&server_id).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn servers_move(
+    server_ids: Vec<String>,
+    target_dir: String,
+    manager: State<'_, ServerProcessManager>,
+) -> Result<MoveServersReport> {
+    {
+        let processes = manager.processes.lock().await;
+        if server_ids.iter().any(|id| processes.contains_key(id)) {
+            return Err(server_error(
+                "A selected server is still running; stop it before moving it",
+            ));
+        }
+    }
+    Ok(theseus::servers::move_servers_to_dir(server_ids, target_dir).await?)
+}
+
+#[tauri::command]
+pub async fn servers_default_dir() -> Result<String> {
+    Ok(theseus::servers::default_servers_dir().await?)
+}
+
+#[tauri::command]
 pub async fn servers_create_from_profile(
     instance_id: String,
     save_name: Option<String>,
@@ -132,7 +165,7 @@ pub async fn servers_open_folder<R: Runtime>(
         .into_iter()
         .find(|s| s.id == server_id)
         .ok_or_else(|| server_error("Server not found"))?;
-    let dir = state.directories.servers_dir().join(&server.path);
+    let dir = server_dir(&state, &server.path);
     if let Err(e) = app.opener().open_path(dir.to_string_lossy(), None::<&str>) {
         return Err(server_error(&format!("Failed to open server folder: {e}")));
     }
@@ -143,7 +176,7 @@ async fn spawn_args(
     server: &ChocoServer,
 ) -> Result<(std::path::PathBuf, String, Vec<String>)> {
     let state = theseus::State::get().await?;
-    let dir = state.directories.servers_dir().join(&server.path);
+    let dir = server_dir(&state, &server.path);
 
     let java = server.java_path.clone().unwrap_or_else(|| "java".to_string());
 
@@ -259,7 +292,9 @@ pub async fn servers_run<R: Runtime>(
         });
     }
 
-    // Wait for process exit in the background: remove from manager + emit status
+    // Wait for process exit in the background: remove from manager + emit status.
+    // Poll with short locks — holding the mutex across wait() would deadlock
+    // servers_stop, which needs it to write the stop command.
     {
         let app = app.clone();
         let server_id = server_id.clone();
@@ -274,8 +309,16 @@ pub async fn servers_run<R: Runtime>(
             tauri::async_runtime::spawn(async move {
                 let app = app.clone();
                 let server_id = server_id.clone();
-                let mut guard = process.lock().await;
-                let _ = guard.child.wait().await;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    let exited = {
+                        let mut guard = process.lock().await;
+                        guard.child.try_wait().map(|e| e.is_some()).unwrap_or(true)
+                    };
+                    if exited {
+                        break;
+                    }
+                }
                 let manager = app.state::<ServerProcessManager>();
                 {
                     let mut processes = manager.processes.lock().await;
@@ -314,9 +357,24 @@ pub async fn servers_stop(
             // Graceful shutdown: send the stop command to the server console
             let _ = stdin.write_all(b"stop\n").await;
             let _ = stdin.flush().await;
-        } else if let Err(e) = guard.child.start_kill() {
-            tracing::warn!("Failed to kill server process: {e}");
         }
+    }
+
+    // Some servers ignore stdin stop (e.g. 26.x autopause suspends command
+    // processing) — fall back to killing the process after a grace period.
+    for _ in 0..30 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let mut guard = process.lock().await;
+        if guard.child.try_wait().map_err(|e| {
+            server_error(&format!("Failed to check server status: {e}"))
+        })?.is_some() {
+            return Ok(());
+        }
+    }
+
+    let mut guard = process.lock().await;
+    if let Err(e) = guard.child.start_kill() {
+        tracing::warn!("Failed to kill server process: {e}");
     }
 
     Ok(())

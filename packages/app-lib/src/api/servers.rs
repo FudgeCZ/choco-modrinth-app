@@ -2,7 +2,7 @@
 //! servers (jar downloads, EULA, server.properties, start scripts).
 
 use crate::event::emit::{emit_loading, init_loading};
-use crate::event::LoadingBarId;
+use crate::event::{LoadingBarId, LoadingBarType};
 use crate::state::{ModLoader, State};
 use crate::util::fetch;
 use chrono::{DateTime, Utc};
@@ -190,8 +190,178 @@ fn sanitize_server_name(name: &str) -> String {
     }
 }
 
-fn server_dir(state: &State, path: &str) -> PathBuf {
-    state.directories.servers_dir().join(path)
+/// Resolves a server's folder: an absolute `path` is used as-is (servers
+/// living in a custom servers directory), relative paths resolve against the
+/// default servers directory.
+pub fn server_dir(state: &State, path: &str) -> PathBuf {
+    if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        state.directories.servers_dir().join(path)
+    }
+}
+
+/// The default servers directory (used as a move target for "reset").
+pub async fn default_servers_dir() -> crate::Result<String> {
+    let state = State::get().await?;
+    Ok(state
+        .directories
+        .servers_dir()
+        .to_string_lossy()
+        .to_string())
+}
+
+/// Moves the given servers into `target_dir` (creating it if needed),
+/// updating the servers index afterwards. Cross-drive moves are supported
+/// (copy + delete), with a progress bar per server. Running servers must be
+/// stopped first (checked by the caller).
+pub async fn move_servers_to_dir(
+    server_ids: Vec<String>,
+    target_dir: String,
+) -> crate::Result<MoveServersReport> {
+    let state = State::get().await?;
+
+    let target = PathBuf::from(&target_dir);
+    if !target.exists() {
+        std::fs::create_dir_all(&target)
+            .map_err(|e| crate::util::io::IOError::with_path(e, &target))?;
+    }
+    let target = crate::util::io::canonicalize(target)?;
+    let default_dir =
+        crate::util::io::canonicalize(state.directories.servers_dir().clone())?;
+    // When moving back into the default directory, store relative paths again
+    let into_default = target == default_dir;
+
+    let mut servers = list_servers().await?;
+    let mut moved = Vec::new();
+    let mut failed = Vec::new();
+
+    for server_id in server_ids {
+        let Some(pos) = servers.iter().position(|s| s.id == server_id) else {
+            continue;
+        };
+        let name = servers[pos].name.clone();
+
+        let source = server_dir(&state, &servers[pos].path);
+        if !source.is_dir() {
+            failed.push(MoveServersFailure {
+                server_id,
+                name,
+                error: "Server folder was not found".to_string(),
+            });
+            continue;
+        }
+        let folder_name = source
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| servers[pos].path.clone());
+        let dest = target.join(&folder_name);
+
+        if source != dest {
+            if dest.exists() {
+                failed.push(MoveServersFailure {
+                    server_id,
+                    name,
+                    error: format!(
+                        "A folder named '{folder_name}' already exists in the target location"
+                    ),
+                });
+                continue;
+            }
+
+            let total = count_server_files(&source);
+            let bar = init_loading(
+                LoadingBarType::ZipExtract {
+                    instance_id: String::new(),
+                    instance_name: name.clone(),
+                },
+                total as f64,
+                &format!("Moving {}...", name),
+            )
+            .await?;
+
+            {
+                let _permit = state.io_semaphore.0.acquire().await?;
+                copy_dir_all(&source, &dest, Some(&bar)).await?;
+                tokio::fs::remove_dir_all(&source)
+                    .await
+                    .map_err(|e| crate::util::io::IOError::with_path(e, &source))?;
+            }
+            drop(bar);
+        }
+
+        let new_path = if into_default {
+            folder_name
+        } else {
+            dest.to_string_lossy().to_string()
+        };
+        servers[pos].path = new_path.clone();
+        moved.push(MoveServersMoved {
+            server_id,
+            name,
+            new_path,
+        });
+    }
+
+    write_servers_index(&state, &servers).await?;
+
+    Ok(MoveServersReport { moved, failed })
+}
+
+#[derive(Serialize)]
+pub struct MoveServersMoved {
+    pub server_id: String,
+    pub name: String,
+    pub new_path: String,
+}
+
+#[derive(Serialize)]
+pub struct MoveServersFailure {
+    pub server_id: String,
+    pub name: String,
+    pub error: String,
+}
+
+#[derive(Serialize)]
+pub struct MoveServersReport {
+    pub moved: Vec<MoveServersMoved>,
+    pub failed: Vec<MoveServersFailure>,
+}
+
+fn count_server_files(path: &Path) -> u64 {
+    let mut count = 0;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                count += count_server_files(&entry_path);
+            } else {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// Writes an accepted EULA for the server and updates its index entry, so
+/// the Run action becomes available.
+pub async fn accept_server_eula(server_id: &str) -> crate::Result<()> {
+    let state = State::get().await?;
+    let mut servers = list_servers().await?;
+    if let Some(pos) = servers.iter().position(|s| s.id == server_id) {
+        let dir = server_dir(&state, &servers[pos].path);
+        crate::util::io::create_dir_all(&dir).await?;
+        write_text_file(
+            &dir.join("eula.txt"),
+            &format!(
+                "# Accepted via ChocoModrinth server creator on {}\neula=true\n",
+                Utc::now().to_rfc3339()
+            ),
+        )?;
+        servers[pos].eula_accepted = true;
+        write_servers_index(&state, &servers).await?;
+    }
+    Ok(())
 }
 
 pub async fn delete_server(server_id: &str) -> crate::Result<()> {
@@ -504,6 +674,70 @@ fn required_java_version(game_version: &str) -> u32 {
         17
     } else {
         8
+    }
+}
+
+/// Resolves the Java major version a game version actually requires, by
+/// reading Mojang's version metadata (covers the post-1.x versioning era,
+/// e.g. 26.2 requiring Java 25, which the legacy heuristic above misses).
+/// Falls back to the heuristic when the metadata cannot be fetched.
+async fn resolve_server_java_version(game_version: &str) -> u32 {
+    #[derive(Deserialize)]
+    struct Manifest {
+        versions: Vec<ManifestVersion>,
+    }
+    #[derive(Deserialize)]
+    struct ManifestVersion {
+        id: String,
+        url: String,
+    }
+    #[derive(Deserialize)]
+    struct VersionJson {
+        #[serde(rename = "javaVersion")]
+        java_version: Option<JavaVersion>,
+    }
+    #[derive(Deserialize)]
+    struct JavaVersion {
+        #[serde(rename = "majorVersion")]
+        major_version: u32,
+    }
+
+    let state = match State::get().await {
+        Ok(state) => state,
+        Err(_) => return required_java_version(game_version),
+    };
+    let manifest: Result<Manifest, _> = fetch::fetch_json(
+        reqwest::Method::GET,
+        VANILLA_MANIFEST_URL,
+        None,
+        None,
+        None,
+        &state.api_semaphore,
+        &state.pool,
+    )
+    .await;
+    let Ok(manifest) = manifest else {
+        return required_java_version(game_version);
+    };
+    let Some(version) = manifest.versions.into_iter().find(|v| v.id == game_version) else {
+        return required_java_version(game_version);
+    };
+    let version_json: Result<VersionJson, _> = fetch::fetch_json(
+        reqwest::Method::GET,
+        &version.url,
+        None,
+        None,
+        None,
+        &state.api_semaphore,
+        &state.pool,
+    )
+    .await;
+    match version_json {
+        Ok(json) => json
+            .java_version
+            .map(|j| j.major_version)
+            .unwrap_or_else(|| required_java_version(game_version)),
+        Err(_) => required_java_version(game_version),
     }
 }
 
@@ -951,19 +1185,43 @@ pub async fn create_server(opts: CreateServerOptions) -> crate::Result<ChocoServ
     let mut servers = list_servers().await?;
 
     let name = sanitize_server_name(&opts.name);
+    // When a custom servers directory is configured, new servers are created
+    // there and the stored path is absolute
+    let settings = crate::state::Settings::get(&state.pool).await?;
+    let custom_root = settings
+        .custom_servers_dir
+        .as_deref()
+        .map(PathBuf::from);
+    if let Some(root) = &custom_root {
+        crate::util::io::create_dir_all(root).await?;
+    }
+    let resolve_dir = |path: &str| -> PathBuf {
+        match &custom_root {
+            Some(root) => root.join(path),
+            None => state.directories.servers_dir().join(path),
+        }
+    };
+
     let mut path = name.clone();
+    let mut dir = resolve_dir(&path);
     let mut suffix = 2;
-    while servers.iter().any(|s| s.path == path) {
+    while servers.iter().any(|s| s.path == path) || dir.exists() {
         path = format!("{name} ({suffix})");
+        dir = resolve_dir(&path);
         suffix += 1;
     }
+    if custom_root.is_some() {
+        // Paths in the custom directory are stored absolute
+        path = dir.to_string_lossy().to_string();
+    }
 
-    let dir = server_dir(&state, &path);
     crate::util::io::create_dir_all(&dir).await?;
 
     // Resolve a Java runtime for installation and running the server
-    let java_path =
-        crate::api::jre::auto_install_java(required_java_version(&opts.game_version)).await?;
+    let java_path = crate::api::jre::auto_install_java(
+        resolve_server_java_version(&opts.game_version).await,
+    )
+    .await?;
 
     let (jar_file, resolved_loader_version) = match opts.loader {
         ServerLoader::Vanilla => {
@@ -1143,7 +1401,7 @@ pub async fn create_server_from_profile(
 
     let server = create_server(options).await?;
 
-    let server_dir = state.directories.servers_dir().join(&server.path);
+    let server_dir = server_dir(&state, &server.path);
     let instance_dir = state
         .directories
         .instances_dir()
@@ -1212,7 +1470,7 @@ async fn sync_profile_content(
         .clone();
     let _ = instance_dir;
     let instance_path = crate::api::instance::get_full_path(instance_id).await?;
-    let server_dir = state.directories.servers_dir().join(&server.path);
+    let server_dir = server_dir(&state, &server.path);
 
     let mut report = ProfileSyncReport {
         mods_copied: 0,

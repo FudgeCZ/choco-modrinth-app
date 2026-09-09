@@ -109,6 +109,26 @@ export async function open_server_folder(serverId: string): Promise<void> {
 	return await invoke('plugin:servers|servers_open_folder', { serverId })
 }
 
+export type MoveServersReport = {
+	moved: { server_id: string; name: string; new_path: string }[]
+	failed: { server_id: string; name: string; error: string }[]
+}
+
+export async function move_servers(
+	serverIds: string[],
+	targetDir: string,
+): Promise<MoveServersReport> {
+	return await invoke('plugin:servers|servers_move', { serverIds, targetDir })
+}
+
+export async function default_servers_dir(): Promise<string> {
+	return await invoke('plugin:servers|servers_default_dir')
+}
+
+export async function accept_server_eula(serverId: string): Promise<void> {
+	return await invoke('plugin:servers|servers_accept_eula', { serverId })
+}
+
 // Global reactive state for server processes and console output
 export const runningServers = ref<Record<string, boolean>>({})
 export const serverConsoleLines = ref<Record<string, string[]>>({})
