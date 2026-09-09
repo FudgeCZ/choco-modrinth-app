@@ -29,6 +29,7 @@ tauri-plugin-dialog = { workspace = true }
 tauri-plugin-fs = { workspace = true }
 tauri-plugin-http = { workspace = true }
 tauri-plugin-opener = { workspace = true }
+sysinfo = { workspace = true, features = ["system"] }
 tauri-plugin-os = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-updater = { workspace = true }

@@ -129,6 +129,75 @@ export async function accept_server_eula(serverId: string): Promise<void> {
 	return await invoke('plugin:servers|servers_accept_eula', { serverId })
 }
 
+export type ServerStats = {
+	cpu_percent: number
+	ram_mb: number
+	ram_percent: number
+}
+
+export type ServerPing = {
+	motd: string | null
+	players_online: number
+	players_max: number
+	players: string[]
+	favicon: string | null
+	version: string | null
+}
+
+export type ServerContentItem = {
+	file_name: string
+	title: string | null
+	version: string | null
+	icon_url: string | null
+	size: number
+	enabled: boolean
+}
+
+export async function get_server_stats(serverId: string): Promise<ServerStats> {
+	return await invoke('plugin:servers|servers_stats', { serverId })
+}
+
+export async function send_server_command(serverId: string, command: string): Promise<void> {
+	return await invoke('plugin:servers|servers_command', { serverId, command })
+}
+
+export async function ping_server(port: number): Promise<ServerPing> {
+	return await invoke('plugin:servers|servers_ping', { port })
+}
+
+export async function get_server_properties(
+	serverId: string,
+): Promise<[string, string][]> {
+	return await invoke('plugin:servers|servers_get_properties', { serverId })
+}
+
+export async function set_server_properties(
+	serverId: string,
+	props: [string, string][],
+): Promise<void> {
+	return await invoke('plugin:servers|servers_set_properties', { serverId, props })
+}
+
+export async function list_server_content(serverId: string): Promise<ServerContentItem[]> {
+	return await invoke('plugin:servers|servers_list_content', { serverId })
+}
+
+export async function set_server_content_enabled(
+	serverId: string,
+	fileName: string,
+	enabled: boolean,
+): Promise<void> {
+	return await invoke('plugin:servers|servers_set_content_enabled', {
+		serverId,
+		fileName,
+		enabled,
+	})
+}
+
+export async function delete_server_content(serverId: string, fileName: string): Promise<void> {
+	return await invoke('plugin:servers|servers_delete_content', { serverId, fileName })
+}
+
 // Global reactive state for server processes and console output
 export const runningServers = ref<Record<string, boolean>>({})
 export const serverConsoleLines = ref<Record<string, string[]>>({})

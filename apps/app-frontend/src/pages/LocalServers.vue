@@ -9,6 +9,7 @@ import {
 	SpinnerIcon,
 	StopCircleIcon,
 	TrashIcon,
+	MoreVerticalIcon,
 } from '@modrinth/assets'
 import {
 	Button,
@@ -16,11 +17,13 @@ import {
 	Combobox,
 	ConfirmModal,
 	injectNotificationManager,
+	TeleportOverflowMenu,
 	NewModal,
 	Slider,
 	Toggle,
 } from '@modrinth/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { useRouter } from 'vue-router'
 import { computed, defineComponent, h, onMounted, ref, useTemplateRef, watch } from 'vue'
 
 import {
@@ -43,6 +46,7 @@ import {
 	open_server_folder,
 	sync_profile_content,
 } from '@/helpers/servers'
+import type { ButtonMenuOption } from '@modrinth/ui'
 import type { GameInstance } from '@/helpers/types'
 import { getInstanceIconUrl, list as list_instances } from '@/helpers/instance'
 import { get_instance_worlds } from '@/helpers/worlds'
@@ -421,16 +425,43 @@ function serverIconUrl(server: ChocoServer): string | null {
 	return server.icon_file ? convertFileSrc(server.icon_file) : null
 }
 
-const dashboardModal = useTemplateRef('dashboardModal')
-const dashboardServer = ref<ChocoServer | null>(null)
+const router = useRouter()
 
-function openDashboard(server: ChocoServer) {
-	dashboardServer.value = server
-	dashboardModal.value?.show()
+function openDashboardPage(server: ChocoServer) {
+	router.push(`/server/${server.id}`)
 }
 
-function toggleRunDashboard() {
-	if (dashboardServer.value) void toggleRun(dashboardServer.value)
+function serverMenuOptions(server: ChocoServer): ButtonMenuOption[] {
+	const options: ButtonMenuOption[] = [
+		{
+			id: 'open-folder',
+			label: 'Open folder',
+			icon: FolderOpenIcon,
+			action: () => void openFolder(server),
+		},
+	]
+	if (server.linked_instance_id) {
+		options.push({
+			id: 'sync',
+			label: 'Sync from profile',
+			action: () => void syncServer(server),
+		})
+	}
+	if (!server.eula_accepted) {
+		options.push({
+			id: 'accept-eula',
+			label: 'Accept EULA',
+			action: () => void acceptEulaFor(server),
+		})
+	}
+	options.push({
+		id: 'delete',
+		label: 'Delete',
+		icon: TrashIcon,
+		tone: 'red',
+		action: () => confirmDelete(server),
+	})
+	return options
 }
 
 async function acceptEulaFor(server: ChocoServer) {
@@ -481,111 +512,119 @@ async function acceptEulaFor(server: ChocoServer) {
 			</Button>
 		</div>
 
-		<div v-else class="flex flex-col gap-3">
+		<div
+			v-else
+			class="grid items-stretch gap-3"
+			style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr))"
+		>
 			<div
 				v-for="entry in creatingServers"
 				:key="entry.key"
-				class="rounded-2xl border-0 border-solid border-divider p-4 bg-surface-2"
+				class="flex flex-col overflow-hidden rounded-2xl border-0 border-solid border-divider bg-surface-2"
 			>
-				<div class="flex flex-wrap items-center gap-3">
-					<div
-						class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-surface-4"
-					>
-						<SpinnerIcon class="size-6 animate-spin text-brand" />
+				<div
+					class="flex aspect-square w-full items-center justify-center bg-surface-3"
+				>
+					<SpinnerIcon class="size-10 animate-spin text-brand" />
+				</div>
+				<div class="flex flex-col gap-1 p-2.5">
+					<p class="m-0 truncate font-bold text-contrast">
+						{{ entry.name }}
+					</p>
+					<p class="m-0 truncate text-xs text-secondary">
+						{{ entry.loaderLabel }} {{ entry.gameVersion }}
+					</p>
+					<div class="h-1.5 w-full overflow-hidden rounded-full bg-surface-5">
+						<div
+							class="h-full rounded-full bg-brand transition-[width] duration-300"
+							:class="entry.progress == null ? 'w-2/5 animate-pulse' : ''"
+							:style="
+								entry.progress != null
+									? { width: `${Math.round(entry.progress * 100)}%` }
+									: undefined
+							"
+						/>
 					</div>
-					<div class="flex min-w-0 flex-1 flex-col gap-1.5">
-						<p class="m-0 truncate text-lg font-bold text-contrast">
-							{{ entry.name }}
-						</p>
-						<p class="m-0 text-sm text-secondary">
-							{{ entry.loaderLabel }} {{ entry.gameVersion }} · {{ entry.message }}
-						</p>
-						<div class="h-1.5 w-full overflow-hidden rounded-full bg-surface-5">
-							<div
-								class="h-full rounded-full bg-brand transition-[width] duration-300"
-								:class="entry.progress == null ? 'w-2/5 animate-pulse' : ''"
-								:style="
-									entry.progress != null
-										? { width: `${Math.round(entry.progress * 100)}%` }
-										: undefined
-								"
-							/>
-						</div>
-					</div>
+					<p class="m-0 truncate text-xs text-secondary">{{ entry.message }}</p>
 				</div>
 			</div>
 
 			<div
 				v-for="server in servers"
 				:key="server.id"
-				class="cursor-pointer rounded-2xl border-0 border-solid p-4 transition-colors bg-surface-2 hover:bg-surface-3"
+				class="flex cursor-pointer flex-col overflow-hidden rounded-2xl border-0 border-solid transition-colors bg-surface-2 hover:bg-surface-3"
 				:class="
 					highlightId === server.id
 						? 'border-2 border-brand shadow-[0_0_12px_var(--color-brand-shadow)]'
 						: 'border-divider'
 				"
-				@click="openDashboard(server)"
+				@click="openDashboardPage(server)"
 			>
-				<div class="flex flex-wrap items-center gap-3">
-					<img
-						v-if="server.icon_file"
-						:src="serverIconUrl(server)"
-						:alt="server.name"
-						class="size-12 rounded-xl object-cover"
-					/>
-					<div class="flex min-w-0 flex-1 flex-col gap-1">
-						<p class="m-0 truncate text-lg font-bold text-contrast">
-							{{ server.name }}
-						</p>
-						<p class="m-0 text-sm text-secondary">
-							{{ loaderLabels[server.loader] }} {{ server.game_version }}
-							<template v-if="server.loader_version"> · {{ server.loader_version }}</template>
-							· {{ server.ram_mb }} MB RAM · port {{ server.port }}
-						</p>
+				<div class="relative">
+					<div
+						class="flex aspect-square w-full items-center justify-center bg-surface-4"
+					>
+						<img
+							v-if="server.icon_file"
+							:src="serverIconUrl(server)"
+							:alt="server.name"
+							class="size-full object-cover"
+						/>
+						<ArchiveIcon v-else class="size-12 text-secondary" />
 					</div>
-					<div class="flex items-center gap-2" @click.stop>
-						<Button
-							v-if="!server.eula_accepted"
-							@click="acceptEulaFor(server)"
+					<div
+						v-if="runningServers[server.id]"
+						class="absolute top-1.5 left-1.5 flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-xs font-semibold text-green"
+					>
+						<span class="size-1.5 rounded-full bg-green" />
+						Running
+					</div>
+					<div class="absolute top-1.5 right-1.5" @click.stop>
+						<TeleportOverflowMenu
+							icon-only
+							size="sm"
+							label="Server actions"
+							:options="serverMenuOptions(server)"
 						>
-							Accept EULA
-						</Button>
-						<Button
-							v-else
-							:color="runningServers[server.id] ? 'red' : 'brand'"
-							@click="toggleRun(server)"
-						>
-							<StopCircleIcon v-if="runningServers[server.id]" aria-hidden="true" />
-							<PlayIcon v-else aria-hidden="true" />
-							{{ runningServers[server.id] ? 'Stop' : 'Run' }}
-						</Button>
-						<Button icon-only @click="openFolder(server)">
-							<FolderOpenIcon aria-hidden="true" />
-						</Button>
-						<Button icon-only color="red" @click="confirmDelete(server)">
-							<TrashIcon aria-hidden="true" />
-						</Button>
+							<MoreVerticalIcon aria-hidden="true" />
+						</TeleportOverflowMenu>
 					</div>
 				</div>
-				<div
-					v-if="server.linked_instance_id"
-					class="mt-3 flex flex-wrap items-center gap-2"
-					@click.stop
-				>
-					<span class="text-xs text-secondary">
-						Linked to a profile — re-sync to pick up updated mods and config.
-					</span>
-					<Button small @click="syncServer(server)">
-						<SpinnerIcon v-if="false" class="animate-spin" aria-hidden="true" />
-						Sync from profile
+				<div class="flex flex-col gap-0.5 p-2.5">
+					<p class="m-0 truncate font-bold text-contrast">
+						{{ server.name }}
+					</p>
+					<p class="m-0 truncate text-xs text-secondary">
+						{{ loaderLabels[server.loader] }} {{ server.game_version }}
+					</p>
+				</div>
+				<div class="mt-auto p-2 pt-0" @click.stop>
+					<Button
+						v-if="!server.eula_accepted"
+						class="w-full"
+						@click="acceptEulaFor(server)"
+					>
+						Accept EULA
+					</Button>
+					<Button
+						v-else-if="runningServers[server.id]"
+						color="red"
+						class="w-full"
+						@click="toggleRun(server)"
+					>
+						<StopCircleIcon aria-hidden="true" />
+						Stop
+					</Button>
+					<Button
+						v-else
+						color="brand"
+						class="w-full"
+						@click="toggleRun(server)"
+					>
+						<PlayIcon aria-hidden="true" />
+						Start
 					</Button>
 				</div>
-				<pre
-					v-if="serverConsoleLines[server.id]?.length"
-					class="mt-3 max-h-40 overflow-auto rounded-xl bg-surface-4 p-3 text-xs whitespace-pre-wrap text-secondary"
-					@click.stop
-					>{{ formatConsole(server.id) }}</pre
-				>
 			</div>
 		</div>
 
@@ -806,95 +845,6 @@ async function acceptEulaFor(server: ChocoServer) {
 			@proceed="doDelete"
 		/>
 
-		<NewModal
-			ref="dashboardModal"
-			:header="dashboardServer?.name ?? 'Server'"
-			class="!w-[44rem]"
-		>
-			<div v-if="dashboardServer" class="flex flex-col gap-4">
-				<div class="flex items-center gap-3">
-					<img
-						v-if="dashboardServer.icon_file"
-						:src="serverIconUrl(dashboardServer)"
-						:alt="dashboardServer.name"
-						class="size-14 rounded-xl object-cover"
-					/>
-					<div
-						v-else
-						class="flex size-14 items-center justify-center rounded-xl bg-surface-3"
-					>
-						<SpinnerIcon v-if="runningServers[dashboardServer.id]" class="size-6 animate-spin text-brand" />
-						<ArchiveIcon v-else class="size-6 text-secondary" />
-					</div>
-					<div class="flex min-w-0 flex-1 flex-col">
-						<p class="m-0 text-lg font-bold text-contrast">
-							{{ dashboardServer.name }}
-						</p>
-						<p class="m-0 text-sm text-secondary">
-							{{ loaderLabels[dashboardServer.loader] }} {{ dashboardServer.game_version }}
-							<template v-if="dashboardServer.loader_version">
-								· {{ dashboardServer.loader_version }}</template
-							>
-						</p>
-					</div>
-					<div class="flex items-center gap-2">
-						<Button icon-only @click="openFolder(dashboardServer)">
-							<FolderOpenIcon aria-hidden="true" />
-						</Button>
-						<Button
-							v-if="!dashboardServer.eula_accepted"
-							@click="acceptEulaFor(dashboardServer)"
-						>
-							Accept EULA
-						</Button>
-						<Button
-							v-else
-							:color="runningServers[dashboardServer.id] ? 'red' : 'brand'"
-							@click="toggleRunDashboard"
-						>
-							<StopCircleIcon
-								v-if="runningServers[dashboardServer.id]"
-								aria-hidden="true"
-							/>
-							<PlayIcon v-else aria-hidden="true" />
-							{{ runningServers[dashboardServer.id] ? 'Stop' : 'Run' }}
-						</Button>
-					</div>
-				</div>
 
-				<div class="grid grid-cols-2 gap-2 text-sm">
-					<div class="rounded-xl bg-surface-3 p-3">
-						<span class="text-secondary">RAM</span>
-						<p class="m-0 font-semibold text-contrast">
-							{{ (dashboardServer.ram_mb / 1024).toFixed(0) }} GB
-						</p>
-					</div>
-					<div class="rounded-xl bg-surface-3 p-3">
-						<span class="text-secondary">Port</span>
-						<p class="m-0 font-semibold text-contrast">{{ dashboardServer.port }}</p>
-					</div>
-					<div class="rounded-xl bg-surface-3 p-3">
-						<span class="text-secondary">Linked profile</span>
-						<p class="m-0 font-semibold text-contrast">
-							{{ dashboardServer.linked_instance_id ? 'Yes' : 'No' }}
-						</p>
-					</div>
-					<div class="rounded-xl bg-surface-3 p-3">
-						<span class="text-secondary">Status</span>
-						<p class="m-0 font-semibold text-contrast">
-							{{ runningServers[dashboardServer.id] ? 'Running' : 'Stopped' }}
-						</p>
-					</div>
-				</div>
-
-				<div>
-					<p class="mb-1 text-sm font-semibold text-contrast">Console</p>
-					<pre
-						class="h-64 overflow-auto rounded-xl bg-surface-4 p-3 text-xs whitespace-pre-wrap text-secondary"
-						>{{ formatConsole(dashboardServer.id) || 'Console output appears here while the server is running.' }}</pre
-					>
-				</div>
-			</div>
-		</NewModal>
 	</div>
 </template>

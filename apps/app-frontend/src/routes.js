@@ -11,6 +11,11 @@ export default new createRouter({
 			component: () => import('@/pages/LocalServers.vue'),
 		},
 		{
+			path: '/server/:id',
+			name: 'Server dashboard',
+			component: () => import('@/pages/server/index.vue'),
+		},
+		{
 			path: '/',
 			name: 'Home',
 			component: () => import('@/pages/Index.vue'),

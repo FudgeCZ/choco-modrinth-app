@@ -5,6 +5,7 @@ use crate::event::emit::{emit_loading, init_loading};
 use crate::event::{LoadingBarId, LoadingBarType};
 use crate::state::{ModLoader, State};
 use crate::util::fetch;
+use base64::Engine;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -1692,3 +1693,328 @@ struct ModrinthProject {
     #[serde(default)]
     server_side: Option<String>,
 }
+// region: server dashboard (ping, properties, content)
+
+fn content_folder_name(loader: ServerLoader) -> &'static str {
+    match loader {
+        ServerLoader::Paper | ServerLoader::Purpur => "plugins",
+        _ => "mods",
+    }
+}
+
+async fn get_server_by_id(state: &State, server_id: &str) -> crate::Result<ChocoServer> {
+    let server = list_servers()
+        .await?
+        .into_iter()
+        .find(|s| s.id == server_id)
+        .ok_or_else(|| {
+            crate::ErrorKind::InputError(format!("Server {server_id} was not found"))
+        })?;
+    Ok(server)
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct ServerPingResult {
+    pub motd: Option<String>,
+    pub players_online: i32,
+    pub players_max: i32,
+    pub players: Vec<String>,
+    pub favicon: Option<String>,
+    pub version: Option<String>,
+}
+
+/// Pings the local server's status endpoint (players online, MOTD, icon).
+pub async fn ping_server(port: u16) -> crate::Result<ServerPingResult> {
+    let status = crate::util::server_ping::get_server_status(
+        &("127.0.0.1", port),
+        ("127.0.0.1", port),
+        None,
+    )
+    .await?;
+
+    fn description_text(
+        raw: &Option<Box<serde_json::value::RawValue>>,
+    ) -> Option<String> {
+        let raw = raw.as_ref()?;
+        let value = serde_json::from_str::<serde_json::Value>(raw.get()).ok()?;
+        if let Some(text) = value.as_str() {
+            return Some(text.to_string());
+        }
+        // chat component: {"text": ...} possibly with extras
+        if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
+            let mut out = text.to_string();
+            if let Some(extras) = value.get("extra").and_then(|v| v.as_array()) {
+                for extra in extras {
+                    if let Some(part) = extra.get("text").and_then(|v| v.as_str()) {
+                        out.push_str(part);
+                    }
+                }
+            }
+            return Some(out);
+        }
+        None
+    }
+
+    let players = status
+        .players
+        .as_ref()
+        .map(|p| p.sample.iter().map(|s| s.name.clone()).collect())
+        .unwrap_or_default();
+
+    Ok(ServerPingResult {
+        motd: description_text(&status.description),
+        players_online: status.players.as_ref().map(|p| p.online).unwrap_or(0),
+        players_max: status.players.as_ref().map(|p| p.max).unwrap_or(0),
+        players,
+        favicon: status.favicon.as_ref().map(|url| url.to_string()),
+        version: status.version.as_ref().map(|v| v.name.clone()),
+    })
+}
+
+/// Reads server.properties as an ordered list of key-value pairs.
+pub async fn get_server_properties(
+    server_id: &str,
+) -> crate::Result<Vec<(String, String)>> {
+    let state = State::get().await?;
+    let server = get_server_by_id(&state, server_id).await?;
+    let path = server_dir(&state, &server.path).join("server.properties");
+    let content = match std::fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let mut props = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            props.push((key.to_string(), value.to_string()));
+        }
+    }
+    Ok(props)
+}
+
+/// Writes server.properties from an ordered list of key-value pairs.
+pub async fn set_server_properties(
+    server_id: &str,
+    props: Vec<(String, String)>,
+) -> crate::Result<()> {
+    let state = State::get().await?;
+    let server = get_server_by_id(&state, server_id).await?;
+    let path = server_dir(&state, &server.path).join("server.properties");
+    let mut content = String::from("# server.properties (edited in ChocoModrinth)\n");
+    for (key, value) in props {
+        content.push_str(&format!("{key}={value}\n"));
+    }
+    std::fs::write(&path, content)
+        .map_err(|e| crate::util::io::IOError::with_path(e, &path))?;
+    Ok(())
+}
+
+#[derive(Serialize, Debug)]
+pub struct ServerContentItem {
+    pub file_name: String,
+    pub title: Option<String>,
+    pub version: Option<String>,
+    pub icon_url: Option<String>,
+    pub size: u64,
+    pub enabled: bool,
+}
+
+fn content_folder(state: &State, server: &ChocoServer) -> crate::Result<PathBuf> {
+    Ok(server_dir(state, &server.path).join(content_folder_name(server.loader)))
+}
+
+/// Extracts mod name/version/icon from jar metadata (fabric/quilt json, forge
+/// toml). Returns defaults when nothing readable is found.
+fn read_jar_metadata(path: &Path) -> (Option<String>, Option<String>, Option<String>) {
+    let Ok(file) = std::fs::File::open(path) else {
+        return (None, None, None);
+    };
+    let mut archive = match zip::ZipArchive::new(file) {
+        Ok(archive) => archive,
+        Err(_) => return (None, None, None),
+    };
+
+    fn read_entry(
+        archive: &mut zip::ZipArchive<std::fs::File>,
+        name: &str,
+    ) -> Option<Vec<u8>> {
+        let mut entry = archive.by_name(name).ok()?;
+        use std::io::Read;
+        let mut buf = Vec::new();
+        entry.read_to_end(&mut buf).ok()?;
+        Some(buf)
+    }
+
+    // fabric.mod.json / quilt.mod.json: name, version, icon path
+    for meta_name in ["fabric.mod.json", "quilt.mod.json"] {
+        if let Some(bytes) = read_entry(&mut archive, meta_name) {
+            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                let (title, version, icon_path) = if meta_name == "fabric.mod.json" {
+                    (
+                        value.get("name").and_then(|v| v.as_str()),
+                        value.get("version").and_then(|v| v.as_str()),
+                        value.get("icon").and_then(|v| v.as_str()),
+                    )
+                } else {
+                    let loader = value.get("quilt_loader");
+                    (
+                        loader
+                            .and_then(|l| l.get("metadata"))
+                            .and_then(|m| m.get("name"))
+                            .and_then(|v| v.as_str()),
+                        loader
+                            .and_then(|l| l.get("version"))
+                            .and_then(|v| v.as_str()),
+                        loader
+                            .and_then(|l| l.get("metadata"))
+                            .and_then(|m| m.get("icon"))
+                            .and_then(|v| v.as_str()),
+                    )
+                };
+                let icon_url = icon_path.and_then(|icon_path| {
+                    read_entry(&mut archive, icon_path).map(|bytes| {
+                        format!(
+                            "data:image/png;base64,{}",
+                            base64::engine::general_purpose::STANDARD.encode(bytes)
+                        )
+                    })
+                });
+                return (
+                    title.map(|s| s.to_string()),
+                    version.map(|s| s.to_string()),
+                    icon_url,
+                );
+            }
+        }
+    }
+
+    // forge: META-INF/mods.toml — grab the first displayName/version
+    if let Some(bytes) = read_entry(&mut archive, "META-INF/mods.toml") {
+        if let Ok(text) = String::from_utf8(bytes) {
+            let mut title = None;
+            let mut version = None;
+            for line in text.lines() {
+                let line = line.trim();
+                if title.is_none()
+                    && let Some(rest) = line.strip_prefix("displayName=")
+                {
+                    title = Some(rest.trim_matches('"').to_string());
+                }
+                if version.is_none()
+                    && let Some(rest) = line.strip_prefix("version=")
+                {
+                    let rest = rest.trim_matches('"');
+                    // forge uses ranges like "${file.jarVersion}" — only literals
+                    if !rest.starts_with("${") {
+                        version = Some(rest.to_string());
+                    }
+                }
+                if title.is_some() && version.is_some() {
+                    break;
+                }
+            }
+            if title.is_some() || version.is_some() {
+                return (title, version, None);
+            }
+        }
+    }
+
+    (None, None, None)
+}
+
+/// Lists the mods/plugins installed on a server.
+pub async fn list_server_content(
+    server_id: &str,
+) -> crate::Result<Vec<ServerContentItem>> {
+    let state = State::get().await?;
+    let server = get_server_by_id(&state, server_id).await?;
+    let folder = content_folder(&state, &server)?;
+    if !folder.is_dir() {
+        return Ok(Vec::new());
+    }
+
+    let mut items = Vec::new();
+    let entries = std::fs::read_dir(&folder)
+        .map_err(|e| crate::util::io::IOError::with_path(e, &folder))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| crate::util::io::IOError::with_path(e, &folder))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let raw_name = entry.file_name().to_string_lossy().to_string();
+        let enabled = !raw_name.ends_with(".disabled");
+        let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+        let (title, version, icon_url) = if enabled {
+            read_jar_metadata(&path)
+        } else {
+            (None, None, None)
+        };
+        items.push(ServerContentItem {
+            file_name: raw_name,
+            title,
+            version,
+            icon_url,
+            size,
+            enabled,
+        });
+    }
+    items.sort_by(|a, b| a.file_name.cmp(&b.file_name));
+    Ok(items)
+}
+
+/// Guards against path traversal: the file must live directly in the
+/// content folder.
+fn checked_content_path(
+    state: &State,
+    server: &ChocoServer,
+    file_name: &str,
+) -> crate::Result<PathBuf> {
+    if file_name.contains('/') || file_name.contains('\\') || file_name.contains("..") {
+        return Err(
+            crate::ErrorKind::InputError("Invalid file name".to_string()).into(),
+        );
+    }
+    Ok(content_folder(state, server)?.join(file_name))
+}
+
+/// Enables or disables a mod/plugin by renaming it with a `.disabled` suffix.
+pub async fn set_server_content_enabled(
+    server_id: &str,
+    file_name: &str,
+    enabled: bool,
+) -> crate::Result<()> {
+    let state = State::get().await?;
+    let server = get_server_by_id(&state, server_id).await?;
+    let path = checked_content_path(&state, &server, file_name)?;
+    let new_name = if enabled {
+        file_name
+            .strip_suffix(".disabled")
+            .unwrap_or(file_name)
+            .to_string()
+    } else {
+        format!("{file_name}.disabled")
+    };
+    let dest = path.with_file_name(new_name);
+    std::fs::rename(&path, &dest)
+        .map_err(|e| crate::util::io::IOError::with_path(e, &path))?;
+    Ok(())
+}
+
+/// Permanently deletes a mod/plugin file.
+pub async fn delete_server_content(
+    server_id: &str,
+    file_name: &str,
+) -> crate::Result<()> {
+    let state = State::get().await?;
+    let server = get_server_by_id(&state, server_id).await?;
+    let path = checked_content_path(&state, &server, file_name)?;
+    std::fs::remove_file(&path)
+        .map_err(|e| crate::util::io::IOError::with_path(e, &path))?;
+    Ok(())
+}
+
+// endregion

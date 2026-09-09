@@ -472,6 +472,14 @@ fn main() {
                         "servers_move",
                         "servers_default_dir",
                         "servers_accept_eula",
+                        "servers_stats",
+                        "servers_command",
+                        "servers_ping",
+                        "servers_get_properties",
+                        "servers_set_properties",
+                        "servers_list_content",
+                        "servers_set_content_enabled",
+                        "servers_delete_content",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

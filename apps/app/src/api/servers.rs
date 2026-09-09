@@ -35,6 +35,14 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             servers_move,
             servers_default_dir,
             servers_accept_eula,
+            servers_stats,
+            servers_command,
+            servers_ping,
+            servers_get_properties,
+            servers_set_properties,
+            servers_list_content,
+            servers_set_content_enabled,
+            servers_delete_content,
         ])
         .build()
 }
@@ -42,11 +50,13 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 #[derive(Default)]
 pub struct ServerProcessManager {
     processes: Mutex<HashMap<String, Arc<Mutex<ServerProcess>>>>,
+    system: Mutex<sysinfo::System>,
 }
 
 struct ServerProcess {
     child: Child,
     stdin: Option<ChildStdin>,
+    pid: Option<u32>,
 }
 
 #[derive(Serialize, Clone)]
@@ -249,8 +259,13 @@ pub async fn servers_run<R: Runtime>(
     let stdin = child.stdin.take();
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
+    let pid_opt = child.id();
 
-    let process = Arc::new(Mutex::new(ServerProcess { child, stdin }));
+    let process = Arc::new(Mutex::new(ServerProcess {
+        child,
+        stdin,
+        pid: pid_opt,
+    }));
     manager
         .processes
         .lock()
@@ -377,5 +392,123 @@ pub async fn servers_stop(
         tracing::warn!("Failed to kill server process: {e}");
     }
 
+    Ok(())
+}
+
+#[derive(Serialize, Clone)]
+pub struct ServerStatsPayload {
+    pub cpu_percent: f32,
+    pub ram_mb: u64,
+    pub ram_percent: f32,
+}
+
+#[tauri::command]
+pub async fn servers_stats(
+    server_id: String,
+    manager: State<'_, ServerProcessManager>,
+) -> Result<ServerStatsPayload> {
+    let pid = {
+        let processes = manager.processes.lock().await;
+        match processes.get(&server_id) {
+            Some(process) => process.lock().await.pid,
+            None => None,
+        }
+    }
+    .ok_or_else(|| server_error("Server is not running"))?;
+
+    let mut system = manager.system.lock().await;
+    system.refresh_memory();
+    let pid_sys = sysinfo::Pid::from_u32(pid);
+    system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid_sys]), true);
+    let (cpu_percent, mem_bytes) = system
+        .process(pid_sys)
+        .map(|p| (p.cpu_usage(), p.memory()))
+        .unwrap_or((0.0, 0));
+    let total = system.total_memory();
+    Ok(ServerStatsPayload {
+        cpu_percent,
+        ram_mb: mem_bytes / 1024 / 1024,
+        ram_percent: if total > 0 {
+            (mem_bytes as f32 / total as f32) * 100.0
+        } else {
+            0.0
+        },
+    })
+}
+
+/// Writes a raw line to the server console (commands, /say for chat).
+#[tauri::command]
+pub async fn servers_command(
+    server_id: String,
+    command: String,
+    manager: State<'_, ServerProcessManager>,
+) -> Result<()> {
+    let process = {
+        let processes = manager.processes.lock().await;
+        processes.get(&server_id).cloned()
+    };
+    let process =
+        process.ok_or_else(|| server_error("Server is not running"))?;
+
+    let mut guard = process.lock().await;
+    if let Some(stdin) = guard.stdin.as_mut() {
+        let line = if command.ends_with('\n') {
+            command
+        } else {
+            format!("{command}\n")
+        };
+        let _ = stdin.write_all(line.as_bytes()).await;
+        let _ = stdin.flush().await;
+        Ok(())
+    } else {
+        Err(server_error("Server console input is not available"))
+    }
+}
+
+#[tauri::command]
+pub async fn servers_ping(port: u16) -> Result<theseus::servers::ServerPingResult> {
+    Ok(theseus::servers::ping_server(port).await?)
+}
+
+#[tauri::command]
+pub async fn servers_get_properties(
+    server_id: String,
+) -> Result<Vec<(String, String)>> {
+    Ok(theseus::servers::get_server_properties(&server_id).await?)
+}
+
+#[tauri::command]
+pub async fn servers_set_properties(
+    server_id: String,
+    props: Vec<(String, String)>,
+) -> Result<()> {
+    theseus::servers::set_server_properties(&server_id, props).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn servers_list_content(
+    server_id: String,
+) -> Result<Vec<theseus::servers::ServerContentItem>> {
+    Ok(theseus::servers::list_server_content(&server_id).await?)
+}
+
+#[tauri::command]
+pub async fn servers_set_content_enabled(
+    server_id: String,
+    file_name: String,
+    enabled: bool,
+) -> Result<()> {
+    theseus::servers::set_server_content_enabled(&server_id, &file_name, enabled)
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn servers_delete_content(
+    server_id: String,
+    file_name: String,
+) -> Result<()> {
+    theseus::servers::delete_server_content(&server_id, &file_name).await?;
     Ok(())
 }
