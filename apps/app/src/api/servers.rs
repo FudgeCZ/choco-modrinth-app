@@ -43,6 +43,9 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             servers_list_content,
             servers_set_content_enabled,
             servers_delete_content,
+            servers_players_overview,
+            servers_player_details,
+            servers_set_player_flag,
         ])
         .build()
 }
@@ -510,5 +513,69 @@ pub async fn servers_delete_content(
     file_name: String,
 ) -> Result<()> {
     theseus::servers::delete_server_content(&server_id, &file_name).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn servers_players_overview(
+    server_id: String,
+) -> Result<theseus::servers::ServerPlayersOverview> {
+    Ok(theseus::servers::players_overview(&server_id).await?)
+}
+
+#[tauri::command]
+pub async fn servers_player_details(
+    server_id: String,
+    player: String,
+) -> Result<theseus::servers::PlayerDetails> {
+    Ok(theseus::servers::player_details(&server_id, &player).await?)
+}
+
+/// Applies a player flag: when the server is running the matching console
+/// command is used (so it takes effect immediately), otherwise the flag is
+/// written to the server's json files directly.
+#[tauri::command]
+pub async fn servers_set_player_flag(
+    server_id: String,
+    player: String,
+    flag: String,
+    value: bool,
+    manager: State<'_, ServerProcessManager>,
+) -> Result<()> {
+    let running = {
+        let processes = manager.processes.lock().await;
+        processes.contains_key(&server_id)
+    };
+
+    if running {
+        let console_command = match (flag.as_str(), value) {
+            ("op", true) => format!("op {player}"),
+            ("op", false) => format!("deop {player}"),
+            ("whitelist", true) => format!("whitelist add {player}"),
+            ("whitelist", false) => format!("whitelist remove {player}"),
+            ("ban", true) => format!("ban {player} Banned via ChocoModrinth"),
+            ("ban", false) => format!("pardon {player}"),
+            ("kick", true) => format!("kick {player}"),
+            _ => return Err(server_error("Unknown player action")),
+        };
+
+        let process = {
+            let processes = manager.processes.lock().await;
+            processes.get(&server_id).cloned()
+        };
+        let process =
+            process.ok_or_else(|| server_error("Server is not running"))?;
+        let mut guard = process.lock().await;
+        if let Some(stdin) = guard.stdin.as_mut() {
+            let _ = stdin.write_all(format!("{console_command}\n").as_bytes()).await;
+            let _ = stdin.flush().await;
+            return Ok(());
+        }
+        drop(guard);
+        // no stdin available: fall through to editing the files
+    }
+
+    theseus::servers::set_player_flag_in_file(&server_id, &player, &flag, value)
+        .await?;
     Ok(())
 }

@@ -53,12 +53,6 @@ const knownFields: {
 	{ key: 'enable-command-block', label: 'Command blocks', type: 'toggle' },
 ]
 
-const otherEntries = computed(() =>
-	entries.value.filter(
-		([key]) => !knownFields.some((field) => field.key === key),
-	),
-)
-
 function valueOf(key: string): string {
 	return entries.value.find(([entryKey]) => entryKey === key)?.[1] ?? ''
 }
@@ -190,13 +184,6 @@ async function save() {
 			</div>
 		</div>
 
-		<div v-if="!loading && otherEntries.length > 0">
-			<h3 class="m-0 mb-2 text-sm font-semibold text-contrast">
-				Other properties (kept as-is)
-			</h3>
-			<p class="m-0 text-xs text-secondary">
-				{{ otherEntries.map(([key]) => key).join(', ') }}
-			</p>
-		</div>
+
 	</div>
 </template>

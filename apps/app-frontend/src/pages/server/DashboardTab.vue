@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ChevronRightIcon, SpinnerIcon } from '@modrinth/assets'
 import { Button, injectNotificationManager } from '@modrinth/ui'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import {
 	get_server_stats,
@@ -47,6 +47,20 @@ const chatLines = computed(() =>
 
 const consolePreview = computed(() =>
 	(serverConsoleLines.value[props.server.id] ?? []).slice(-10),
+)
+
+const previewElement = ref<HTMLElement | null>(null)
+
+watch(
+	() => serverConsoleLines.value[props.server.id]?.length,
+	async () => {
+		await nextTick()
+		const element = previewElement.value
+		if (element) {
+			element.scrollTop = element.scrollHeight
+		}
+	},
+	{ immediate: true },
 )
 
 async function pollStats() {
@@ -197,7 +211,8 @@ onUnmounted(() => {
 					</Button>
 				</div>
 				<pre
-					class="mt-2 h-40 overflow-hidden rounded-xl bg-surface-3 p-3 text-xs whitespace-pre-wrap text-secondary"
+					ref="previewElement"
+					class="mt-2 h-40 overflow-y-auto rounded-xl bg-surface-3 p-3 text-xs whitespace-pre-wrap text-secondary"
 					>{{ consolePreview.length > 0 ? consolePreview.join('\n') : 'Console output appears here while the server is running.' }}</pre
 				>
 			</div>

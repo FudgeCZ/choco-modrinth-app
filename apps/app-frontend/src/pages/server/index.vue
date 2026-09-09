@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import {
 	ArchiveIcon,
+	BoxesIcon,
 	FolderOpenIcon,
+	GaugeIcon,
 	PlayIcon,
 	StopCircleIcon,
+	TerminalSquareIcon,
 	TrashIcon,
+	UsersIcon,
+	WrenchIcon,
 } from '@modrinth/assets'
 import {
 	Button,
 	Chips,
 	ConfirmModal,
 	injectNotificationManager,
+	NavTabs,
 } from '@modrinth/ui'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
@@ -45,6 +51,13 @@ const restarting = ref(false)
 
 const activeTab = ref('dashboard')
 const tabItems = ['dashboard', 'content', 'properties', 'console', 'players'] as const
+const tabIcons: Record<string, unknown> = {
+	dashboard: GaugeIcon,
+	content: BoxesIcon,
+	properties: WrenchIcon,
+	console: TerminalSquareIcon,
+	players: UsersIcon,
+}
 const tabLabels: Record<string, string> = {
 	dashboard: 'Dashboard',
 	content: 'Content',
@@ -52,6 +65,15 @@ const tabLabels: Record<string, string> = {
 	console: 'Console',
 	players: 'Players',
 }
+
+const tabLinks = computed(() =>
+	tabItems.map((item) => ({
+		label: tabLabels[item] ?? item,
+		href: '#' + item,
+		icon: tabIcons[item],
+	})),
+)
+const tabIndex = computed(() => Math.max(0, tabItems.indexOf(activeTab.value)))
 
 useRootBreadcrumb({
 	slot: 'root',
@@ -238,6 +260,7 @@ function serverIconUrl(value: ChocoServer): string | null {
 				<div class="flex flex-wrap items-center gap-2">
 					<Button
 						v-if="!server.eula_accepted"
+						size="lg"
 						color="brand"
 						@click="acceptEula"
 					>
@@ -245,6 +268,7 @@ function serverIconUrl(value: ChocoServer): string | null {
 					</Button>
 					<Button
 						v-if="running"
+						size="lg"
 						color="red"
 						@click="stopServer"
 					>
@@ -253,6 +277,7 @@ function serverIconUrl(value: ChocoServer): string | null {
 					</Button>
 					<Button
 						v-else
+						size="lg"
 						color="brand"
 						:disabled="!server.eula_accepted"
 						:title="server.eula_accepted ? undefined : 'Accept the EULA first'"
@@ -263,6 +288,7 @@ function serverIconUrl(value: ChocoServer): string | null {
 					</Button>
 					<Button
 						v-if="running"
+						size="lg"
 						:disabled="restarting"
 						@click="restartServer"
 					>
@@ -272,20 +298,21 @@ function serverIconUrl(value: ChocoServer): string | null {
 						/>
 						{{ restarting ? 'Restarting…' : 'Restart' }}
 					</Button>
-					<Button icon-only @click="openFolder">
+					<Button icon-only size="lg" @click="openFolder">
 						<FolderOpenIcon aria-hidden="true" />
 					</Button>
-					<Button icon-only color="red" @click="confirmDelete">
+					<Button icon-only size="lg" color="red" @click="confirmDelete">
 						<TrashIcon aria-hidden="true" />
 					</Button>
 				</div>
 			</div>
 
-			<div class="w-fit rounded-xl bg-surface-3 p-1">
-				<Chips
-					v-model="activeTab"
-					:items="[...tabItems]"
-					:format-label="(item: string) => tabLabels[item] ?? item"
+			<div class="w-fit">
+				<NavTabs
+					mode="local"
+					:links="tabLinks"
+					:active-index="tabIndex"
+					@tab-click="(index: number) => (activeTab = tabItems[index])"
 				/>
 			</div>
 

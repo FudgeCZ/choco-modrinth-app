@@ -480,6 +480,9 @@ fn main() {
                         "servers_list_content",
                         "servers_set_content_enabled",
                         "servers_delete_content",
+                        "servers_players_overview",
+                        "servers_player_details",
+                        "servers_set_player_flag",
                     ])
                     .default_permission(
                         DefaultPermissionRule::AllowAllCommands,

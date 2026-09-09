@@ -2018,3 +2018,314 @@ pub async fn delete_server_content(
 }
 
 // endregion
+// region: server players
+
+#[derive(Serialize, Debug, Clone)]
+pub struct KnownPlayer {
+    pub name: String,
+    pub uuid: String,
+    pub op: bool,
+    pub whitelisted: bool,
+    pub banned: bool,
+    pub ban_reason: Option<String>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct ServerPlayersOverview {
+    pub players: Vec<KnownPlayer>,
+}
+
+fn read_json_array(path: &Path) -> Vec<serde_json::Value> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(_) => return Vec::new(),
+    };
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+fn json_str(value: &serde_json::Value, key: &str) -> Option<String> {
+    value.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+/// Known players (from usercache plus the op/whitelist/ban lists) with their
+/// server flags.
+pub async fn players_overview(server_id: &str) -> crate::Result<ServerPlayersOverview> {
+    let state = State::get().await?;
+    let server = get_server_by_id(&state, server_id).await?;
+    let dir = server_dir(&state, &server.path);
+
+    let usercache = read_json_array(&dir.join("usercache.json"));
+    let ops = read_json_array(&dir.join("ops.json"));
+    let whitelist = read_json_array(&dir.join("whitelist.json"));
+    let banned = read_json_array(&dir.join("banned-players.json"));
+
+    // name -> uuid, from any file that knows it
+    let mut uuids: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for source in [&usercache, &ops, &whitelist, &banned] {
+        for entry in source {
+            if let (Some(name), Some(uuid)) = (json_str(entry, "name"), json_str(entry, "uuid")) {
+                uuids.entry(name).or_insert(uuid);
+            }
+        }
+    }
+
+    let is_in = |list: &[serde_json::Value], name: &str| {
+        list.iter()
+            .any(|entry| json_str(entry, "name").as_deref() == Some(name))
+    };
+    let ban_reason = |name: &str| {
+        banned
+            .iter()
+            .find(|entry| json_str(entry, "name").as_deref() == Some(name))
+            .and_then(|entry| json_str(entry, "reason"))
+    };
+
+    let mut names: Vec<String> = uuids.keys().cloned().collect();
+    names.sort();
+
+    Ok(ServerPlayersOverview {
+        players: names
+            .into_iter()
+            .map(|name| {
+                let uuid = uuids.get(&name).cloned().unwrap_or_default();
+                KnownPlayer {
+                    op: is_in(&ops, &name),
+                    whitelisted: is_in(&whitelist, &name),
+                    banned: is_in(&banned, &name),
+                    ban_reason: ban_reason(&name),
+                    name,
+                    uuid,
+                }
+            })
+            .collect(),
+    })
+}
+
+fn uuid_for_player(dir: &Path, player_name: &str) -> crate::Result<String> {
+    let usercache = read_json_array(&dir.join("usercache.json"));
+    for entry in &usercache {
+        if json_str(entry, "name").as_deref() == Some(player_name) {
+            if let Some(uuid) = json_str(entry, "uuid") {
+                return Ok(uuid);
+            }
+        }
+    }
+    Err(crate::ErrorKind::InputError(format!(
+        "Unknown uuid for player '{player_name}' — they must join the server at least once"
+    ))
+    .into())
+}
+
+fn write_json_array(path: &Path, value: &[serde_json::Value]) -> crate::Result<()> {
+    let content = serde_json::to_string_pretty(value)?;
+    std::fs::write(path, content)
+        .map_err(|e| crate::util::io::IOError::with_path(e, path))?;
+    Ok(())
+}
+
+/// Adds or removes a player from ops.json / whitelist.json /
+/// banned-players.json directly (used when the server is stopped).
+pub async fn set_player_flag_in_file(
+    server_id: &str,
+    player_name: &str,
+    flag: &str,
+    value: bool,
+) -> crate::Result<()> {
+    let state = State::get().await?;
+    let server = get_server_by_id(&state, server_id).await?;
+    let dir = server_dir(&state, &server.path);
+
+    let (file_name, name_key) = match flag {
+        "op" => ("ops.json", "name"),
+        "whitelist" => ("whitelist.json", "name"),
+        "ban" => ("banned-players.json", "name"),
+        _ => {
+            return Err(crate::ErrorKind::InputError(format!(
+                "Unknown player flag {flag}"
+            ))
+            .into())
+        }
+    };
+    let path = dir.join(file_name);
+    let mut list = read_json_array(&path);
+
+    if value {
+        let uuid = uuid_for_player(&dir, player_name)?;
+        let mut entry = serde_json::Map::new();
+        entry.insert("uuid".to_string(), serde_json::Value::String(uuid));
+        entry.insert(
+            "name".to_string(),
+            serde_json::Value::String(player_name.to_string()),
+        );
+        if flag == "op" {
+            entry.insert("level".to_string(), serde_json::Value::from(4));
+            entry.insert(
+                "bypassesPlayerLimit".to_string(),
+                serde_json::Value::from(false),
+            );
+        }
+        if flag == "ban" {
+            entry.insert(
+                "created".to_string(),
+                serde_json::Value::String(Utc::now().to_rfc3339()),
+            );
+            entry.insert(
+                "source".to_string(),
+                serde_json::Value::String("Server".to_string()),
+            );
+            entry.insert(
+                "expires".to_string(),
+                serde_json::Value::String("forever".to_string()),
+            );
+            entry.insert(
+                "reason".to_string(),
+                serde_json::Value::String("Banned by an operator".to_string()),
+            );
+        }
+        let already = list.iter().any(|entry| json_str(entry, name_key).as_deref() == Some(player_name));
+        if !already {
+            list.push(serde_json::Value::Object(entry));
+        }
+    } else {
+        list.retain(|entry| json_str(entry, name_key).as_deref() != Some(player_name));
+    }
+
+    write_json_array(&path, &list)
+}
+
+fn nbt_compound<'a>(
+    value: &'a fastnbt::Value,
+) -> Option<&'a std::collections::HashMap<String, fastnbt::Value>> {
+    match value {
+        fastnbt::Value::Compound(map) => Some(map),
+        _ => None,
+    }
+}
+
+fn nbt_int(value: Option<&fastnbt::Value>) -> Option<i32> {
+    match value? {
+        fastnbt::Value::Int(v) => Some(*v),
+        fastnbt::Value::Short(v) => Some(*v as i32),
+        fastnbt::Value::Byte(v) => Some(*v as i32),
+        _ => None,
+    }
+}
+
+fn nbt_float(value: Option<&fastnbt::Value>) -> Option<f32> {
+    match value? {
+        fastnbt::Value::Float(v) => Some(*v),
+        fastnbt::Value::Double(v) => Some(*v as f32),
+        _ => None,
+    }
+}
+
+fn nbt_string(value: Option<&fastnbt::Value>) -> Option<String> {
+    match value? {
+        fastnbt::Value::String(v) => Some(v.clone()),
+        _ => None,
+    }
+}
+
+#[derive(Serialize, Debug)]
+pub struct PlayerInventoryItem {
+    pub name: String,
+    pub count: i32,
+    pub slot: i32,
+}
+
+#[derive(Serialize, Debug)]
+pub struct PlayerDetails {
+    pub name: String,
+    pub uuid: String,
+    pub hearts: Option<f32>,
+    pub food: Option<i32>,
+    pub game_mode: Option<String>,
+    pub bed: Option<[i32; 3]>,
+    pub inventory: Vec<PlayerInventoryItem>,
+}
+
+fn game_mode_name(id: Option<i32>) -> Option<String> {
+    id.map(|id| match id {
+        1 => "creative".to_string(),
+        2 => "adventure".to_string(),
+        3 => "spectator".to_string(),
+        _ => "survival".to_string(),
+    })
+}
+
+/// Reads a player's saved data (health, hunger, bed spawn, inventory) from
+/// the world's playerdata folder.
+pub async fn player_details(
+    server_id: &str,
+    player_name: &str,
+) -> crate::Result<PlayerDetails> {
+    let state = State::get().await?;
+    let server = get_server_by_id(&state, server_id).await?;
+    let dir = server_dir(&state, &server.path);
+    let uuid = uuid_for_player(&dir, player_name)?;
+
+    // world folder name comes from server.properties (defaults to "world")
+    let props = get_server_properties(server_id).await?;
+    let level_name = props
+        .iter()
+        .find(|(key, _)| key == "level-name")
+        .map(|(_, value)| value.clone())
+        .unwrap_or_else(|| "world".to_string());
+
+    let dat_path = dir.join(&level_name).join("playerdata").join(format!("{uuid}.dat"));
+    let file = std::fs::File::open(&dat_path).map_err(|e| {
+        crate::util::io::IOError::with_path(e, &dat_path)
+    })?;
+    let decoder = flate2::read::GzDecoder::new(file);
+    let root: fastnbt::Value = fastnbt::from_reader(decoder)
+        .map_err(|e| crate::ErrorKind::OtherError(format!("Failed to parse player data: {e}")))?;
+
+    let map = nbt_compound(&root).ok_or_else(|| {
+        crate::ErrorKind::OtherError("Unexpected player data format".to_string())
+    })?;
+
+    let hearts = nbt_float(map.get("Health"));
+    let food = nbt_int(map.get("foodLevel"));
+    let game_mode = game_mode_name(nbt_int(map.get("playerGameType")));
+    let bed = match (
+        nbt_int(map.get("SpawnX")),
+        nbt_int(map.get("SpawnY")),
+        nbt_int(map.get("SpawnZ")),
+    ) {
+        (Some(x), Some(y), Some(z)) => Some([x, y, z]),
+        _ => None,
+    };
+
+    let mut inventory = Vec::new();
+    if let Some(fastnbt::Value::List(slots)) = map.get("Inventory") {
+        for slot in slots {
+            let Some(slot_map) = nbt_compound(slot) else {
+                continue;
+            };
+            let name = nbt_string(slot_map.get("id"));
+            let count = nbt_int(slot_map.get("Count").or(slot_map.get("count")));
+            let slot_index = nbt_int(slot_map.get("Slot")).unwrap_or(0);
+            if let Some(name) = name {
+                inventory.push(PlayerInventoryItem {
+                    name,
+                    count: count.unwrap_or(1),
+                    slot: slot_index,
+                });
+            }
+        }
+        inventory.sort_by_key(|item| item.slot);
+    }
+
+    Ok(PlayerDetails {
+        name: player_name.to_string(),
+        uuid,
+        hearts,
+        food,
+        game_mode,
+        bed,
+        inventory,
+    })
+}
+
+// endregion

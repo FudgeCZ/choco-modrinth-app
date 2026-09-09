@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+
 const props = withDefaults(
 	defineProps<{
 		values: number[]
@@ -7,43 +9,58 @@ const props = withDefaults(
 	}>(),
 	{
 		color: 'var(--color-brand)',
-		height: 48,
+		height: 56,
 	},
 )
 
-const points = computed(() => {
+const WIDTH = 600
+const HEIGHT = 120
+
+const linePath = computed(() => {
 	const values = props.values
-	if (values.length === 0) {
+	if (values.length < 2) {
 		return ''
 	}
-	const max = Math.max(...values, 0.0001)
-	const step = 100 / Math.max(values.length - 1, 1)
+	const max = Math.max(...values, 1)
+	const step = WIDTH / (values.length - 1)
 	return values
 		.map((value, index) => {
 			const x = index * step
-			const y = 100 - Math.max(0, Math.min(1, value / max)) * 92 - 4
-			return `${x.toFixed(2)},${y.toFixed(2)}`
+			const y = HEIGHT - 6 - (Math.max(0, Math.min(value, max)) / max) * (HEIGHT - 12)
+			return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`
 		})
 		.join(' ')
 })
+
+const areaPath = computed(() =>
+	linePath.value ? `${linePath.value} L${WIDTH} ${HEIGHT} L0 ${HEIGHT} Z` : '',
+)
 </script>
 
 <template>
-	<svg
-		:viewBox="`0 0 100 100`"
-		preserveAspectRatio="none"
-		class="w-full"
-		:style="{ height: `${height}px` }"
-		aria-hidden="true"
-	>
-		<polyline
-			:points="points"
-			fill="none"
-			:stroke="color"
-			stroke-width="2.5"
-			vector-effect="non-scaling-stroke"
-			stroke-linejoin="round"
-			stroke-linecap="round"
-		/>
-	</svg>
+	<div class="w-full" :style="{ height: `${height}px` }">
+		<svg
+			v-if="areaPath"
+			viewBox="0 0 600 120"
+			preserveAspectRatio="none"
+			class="h-full w-full"
+			aria-hidden="true"
+		>
+			<path :d="areaPath" :fill="color" fill-opacity="0.15" />
+			<path
+				:d="linePath"
+				fill="none"
+				:stroke="color"
+				stroke-width="4"
+				stroke-linejoin="round"
+				stroke-linecap="round"
+			/>
+		</svg>
+		<div
+			v-else
+			class="flex h-full items-center text-xs text-secondary"
+		>
+			Collecting data…
+		</div>
+	</div>
 </template>

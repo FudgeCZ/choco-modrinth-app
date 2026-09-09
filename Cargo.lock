@@ -3676,6 +3676,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fastnbt"
+version = "2.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9dcc36fee27b17c9c183294d6e739cf218b01ce0fc545c31d8be3913d961731"
+dependencies = [
+ "byteorder",
+ "cesu8",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
 name = "fastrand"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11389,6 +11401,7 @@ dependencies = [
  "encoding_rs",
  "enumset",
  "eyre",
+ "fastnbt",
  "flate2",
  "fs4",
  "futures",

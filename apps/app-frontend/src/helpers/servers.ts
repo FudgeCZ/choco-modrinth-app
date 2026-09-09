@@ -198,6 +198,57 @@ export async function delete_server_content(serverId: string, fileName: string):
 	return await invoke('plugin:servers|servers_delete_content', { serverId, fileName })
 }
 
+export type KnownPlayer = {
+	name: string
+	uuid: string
+	op: boolean
+	whitelisted: boolean
+	banned: boolean
+	ban_reason: string | null
+}
+
+export type ServerPlayersOverview = {
+	players: KnownPlayer[]
+}
+
+export type PlayerInventoryItem = {
+	name: string
+	count: number
+	slot: number
+}
+
+export type PlayerDetails = {
+	name: string
+	uuid: string
+	hearts: number | null
+	food: number | null
+	game_mode: string | null
+	bed: [number, number, number] | null
+	inventory: PlayerInventoryItem[]
+}
+
+export async function get_players_overview(serverId: string): Promise<ServerPlayersOverview> {
+	return await invoke('plugin:servers|servers_players_overview', { serverId })
+}
+
+export async function get_player_details(serverId: string, player: string): Promise<PlayerDetails> {
+	return await invoke('plugin:servers|servers_player_details', { serverId, player })
+}
+
+export async function set_player_flag(
+	serverId: string,
+	player: string,
+	flag: 'op' | 'whitelist' | 'ban' | 'kick',
+	value: boolean,
+): Promise<void> {
+	return await invoke('plugin:servers|servers_set_player_flag', {
+		serverId,
+		player,
+		flag,
+		value,
+	})
+}
+
 // Global reactive state for server processes and console output
 export const runningServers = ref<Record<string, boolean>>({})
 export const serverConsoleLines = ref<Record<string, string[]>>({})
