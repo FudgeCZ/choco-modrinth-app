@@ -19,6 +19,10 @@
 			"dependsOn": ["//#i18n:coverage", "^build"],
 			"inputs": ["$TURBO_DEFAULT$", ".env*"],
 			"outputs": [".nuxt/**", "dist/**", ".output/**", "$TURBO_ROOT$/target/**"],
+			// Upstream caches the whole root `target/` folder into .turbo/cache
+			// on every build (for CI Rust-cache reuse). Locally that grew to
+			// 130+ GB with almost no cache hits, so caching is disabled here.
+			"cache": false,
 			"env": [
 				"NODE_ENV",
 				"SITE_URL",
@@ -49,6 +53,22 @@
 				"PREVIEW"
 			],
 			"passThroughEnv": ["SCCACHE_*", "RUSTC_WRAPPER", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+		},
+		"build:fast": {
+			"dependsOn": ["//#i18n:coverage", "^build"],
+			"inputs": ["$TURBO_DEFAULT$", ".env*"],
+			"cache": false,
+			"env": [
+				"NODE_ENV",
+				"SQLX_OFFLINE",
+				"DATABASE_URL",
+				"CARGO_*",
+				"RUST_*",
+				"RUSTFLAGS",
+				"FORCE_COLOR",
+				"BUILD_ENV",
+				"PREVIEW"
+			]
 		},
 		"lint": {
 			"env": [
