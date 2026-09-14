@@ -2,7 +2,7 @@
 //! servers (jar downloads, EULA, server.properties, start scripts).
 
 use crate::event::emit::{emit_loading, init_loading};
-use crate::event::{LoadingBarId, LoadingBarType};
+use crate::event::LoadingBarId;
 use crate::state::{ModLoader, State};
 use crate::util::fetch;
 use base64::Engine;
@@ -251,148 +251,6 @@ pub fn server_dir(state: &State, path: &str) -> PathBuf {
     } else {
         state.directories.servers_dir().join(path)
     }
-}
-
-/// The default servers directory (used as a move target for "reset").
-pub async fn default_servers_dir() -> crate::Result<String> {
-    let state = State::get().await?;
-    Ok(state
-        .directories
-        .servers_dir()
-        .to_string_lossy()
-        .to_string())
-}
-
-/// Moves the given servers into `target_dir` (creating it if needed),
-/// updating the servers index afterwards. Cross-drive moves are supported
-/// (copy + delete), with a progress bar per server. Running servers must be
-/// stopped first (checked by the caller).
-pub async fn move_servers_to_dir(
-    server_ids: Vec<String>,
-    target_dir: String,
-) -> crate::Result<MoveServersReport> {
-    let state = State::get().await?;
-
-    let target = PathBuf::from(&target_dir);
-    if !target.exists() {
-        std::fs::create_dir_all(&target)
-            .map_err(|e| crate::util::io::IOError::with_path(e, &target))?;
-    }
-    let target = crate::util::io::canonicalize(target)?;
-    let default_dir =
-        crate::util::io::canonicalize(state.directories.servers_dir().clone())?;
-    // When moving back into the default directory, store relative paths again
-    let into_default = target == default_dir;
-
-    let mut servers = list_servers().await?;
-    let mut moved = Vec::new();
-    let mut failed = Vec::new();
-
-    for server_id in server_ids {
-        let Some(pos) = servers.iter().position(|s| s.id == server_id) else {
-            continue;
-        };
-        let name = servers[pos].name.clone();
-
-        let source = server_dir(&state, &servers[pos].path);
-        if !source.is_dir() {
-            failed.push(MoveServersFailure {
-                server_id,
-                name,
-                error: "Server folder was not found".to_string(),
-            });
-            continue;
-        }
-        let folder_name = source
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| servers[pos].path.clone());
-        let dest = target.join(&folder_name);
-
-        if source != dest {
-            if dest.exists() {
-                failed.push(MoveServersFailure {
-                    server_id,
-                    name,
-                    error: format!(
-                        "A folder named '{folder_name}' already exists in the target location"
-                    ),
-                });
-                continue;
-            }
-
-            let total = count_server_files(&source);
-            let bar = init_loading(
-                LoadingBarType::ZipExtract {
-                    instance_id: String::new(),
-                    instance_name: name.clone(),
-                },
-                total as f64,
-                &format!("Moving {}...", name),
-            )
-            .await?;
-
-            {
-                let _permit = state.io_semaphore.0.acquire().await?;
-                copy_dir_all(&source, &dest, Some(&bar)).await?;
-                tokio::fs::remove_dir_all(&source)
-                    .await
-                    .map_err(|e| crate::util::io::IOError::with_path(e, &source))?;
-            }
-            drop(bar);
-        }
-
-        let new_path = if into_default {
-            folder_name
-        } else {
-            dest.to_string_lossy().to_string()
-        };
-        servers[pos].path = new_path.clone();
-        moved.push(MoveServersMoved {
-            server_id,
-            name,
-            new_path,
-        });
-    }
-
-    write_servers_index(&state, &servers).await?;
-
-    Ok(MoveServersReport { moved, failed })
-}
-
-#[derive(Serialize)]
-pub struct MoveServersMoved {
-    pub server_id: String,
-    pub name: String,
-    pub new_path: String,
-}
-
-#[derive(Serialize)]
-pub struct MoveServersFailure {
-    pub server_id: String,
-    pub name: String,
-    pub error: String,
-}
-
-#[derive(Serialize)]
-pub struct MoveServersReport {
-    pub moved: Vec<MoveServersMoved>,
-    pub failed: Vec<MoveServersFailure>,
-}
-
-fn count_server_files(path: &Path) -> u64 {
-    let mut count = 0;
-    if let Ok(entries) = std::fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let entry_path = entry.path();
-            if entry_path.is_dir() {
-                count += count_server_files(&entry_path);
-            } else {
-                count += 1;
-            }
-        }
-    }
-    count
 }
 
 /// Writes an accepted EULA for the server and updates its index entry, so
@@ -1472,22 +1330,8 @@ pub async fn create_server(opts: CreateServerOptions) -> crate::Result<ChocoServ
     let mut servers = list_servers().await?;
 
     let name = sanitize_server_name(&opts.name);
-    // When a custom servers directory is configured, new servers are created
-    // there and the stored path is absolute
-    let settings = crate::state::Settings::get(&state.pool).await?;
-    let custom_root = settings
-        .custom_servers_dir
-        .as_deref()
-        .map(PathBuf::from);
-    if let Some(root) = &custom_root {
-        crate::util::io::create_dir_all(root).await?;
-    }
-    let resolve_dir = |path: &str| -> PathBuf {
-        match &custom_root {
-            Some(root) => root.join(path),
-            None => state.directories.servers_dir().join(path),
-        }
-    };
+    let resolve_dir =
+        |path: &str| -> PathBuf { state.directories.servers_dir().join(path) };
 
     let mut path = name.clone();
     let mut dir = resolve_dir(&path);
@@ -1496,10 +1340,6 @@ pub async fn create_server(opts: CreateServerOptions) -> crate::Result<ChocoServ
         path = format!("{name} ({suffix})");
         dir = resolve_dir(&path);
         suffix += 1;
-    }
-    if custom_root.is_some() {
-        // Paths in the custom directory are stored absolute
-        path = dir.to_string_lossy().to_string();
     }
 
     crate::util::io::create_dir_all(&dir).await?;
@@ -1988,7 +1828,7 @@ fn content_folder_name(loader: ServerLoader) -> &'static str {
     }
 }
 
-async fn get_server_by_id(state: &State, server_id: &str) -> crate::Result<ChocoServer> {
+async fn get_server_by_id(_state: &State, server_id: &str) -> crate::Result<ChocoServer> {
     let server = list_servers()
         .await?
         .into_iter()

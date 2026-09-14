@@ -21,6 +21,11 @@ mod updater_impl;
 #[cfg(not(feature = "updater"))]
 mod updater_impl_noop;
 
+// ChocoModrinth shares the launcher data directory (profiles, servers,
+// database, accounts) with the official Modrinth App, so both manage the
+// same set of profiles instead of creating duplicates.
+const LAUNCHER_DATA_IDENTIFIER: &str = "ModrinthApp";
+
 // Should be called in launcher initialization
 #[tracing::instrument(skip_all)]
 #[tauri::command]
@@ -32,7 +37,7 @@ async fn initialize_state(
     theseus::EventState::init(app.clone(), events).await?;
 
     tracing::info!("Initializing app state...");
-    State::init(app.config().identifier.clone()).await?;
+    State::init(LAUNCHER_DATA_IDENTIFIER.to_string()).await?;
 
     let state = State::get().await?;
     app.asset_protocol_scope()
@@ -137,7 +142,7 @@ fn main() {
 
     let tauri_context = tauri::generate_context!();
 
-    let _log_guard = theseus::start_logger(&tauri_context.config().identifier);
+    let _log_guard = theseus::start_logger(LAUNCHER_DATA_IDENTIFIER);
 
     tracing::info!("Initialized tracing subscriber. Loading ChocoModrinth!");
 

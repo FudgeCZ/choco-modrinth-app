@@ -3,9 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_opener::OpenerExt;
-use theseus::servers::{
-    server_dir, ChocoServer, CreateServerOptions, MoveServersReport, ServerLoader,
-};
+use theseus::servers::{server_dir, ChocoServer, CreateServerOptions, ServerLoader};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
@@ -37,8 +35,6 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
             servers_stop,
             servers_is_running,
             servers_open_folder,
-            servers_move,
-            servers_default_dir,
             servers_accept_eula,
             servers_stats,
             servers_command,
@@ -167,28 +163,6 @@ pub async fn servers_is_running(
 pub async fn servers_accept_eula(server_id: String) -> Result<()> {
     theseus::servers::accept_server_eula(&server_id).await?;
     Ok(())
-}
-
-#[tauri::command]
-pub async fn servers_move(
-    server_ids: Vec<String>,
-    target_dir: String,
-    manager: State<'_, ServerProcessManager>,
-) -> Result<MoveServersReport> {
-    {
-        let processes = manager.processes.lock().await;
-        if server_ids.iter().any(|id| processes.contains_key(id)) {
-            return Err(server_error(
-                "A selected server is still running; stop it before moving it",
-            ));
-        }
-    }
-    Ok(theseus::servers::move_servers_to_dir(server_ids, target_dir).await?)
-}
-
-#[tauri::command]
-pub async fn servers_default_dir() -> Result<String> {
-    Ok(theseus::servers::default_servers_dir().await?)
 }
 
 #[tauri::command]

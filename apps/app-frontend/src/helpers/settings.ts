@@ -68,8 +68,6 @@ export type AppSettings = {
 	custom_dir?: string | null
 	prev_custom_dir?: string | null
 	migrated: boolean
-	custom_profiles_dir?: string | null
-	custom_servers_dir?: string | null
 
 	developer_mode: boolean
 	feature_flags: Record<FeatureFlag, boolean>
