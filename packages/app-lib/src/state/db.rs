@@ -35,7 +35,16 @@ async fn open_migrated_app_db(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
         );
     }
 
-    sqlx::migrate!().run(&pool).await?;
+    // ChocoModrinth shares the database with the official Modrinth App, whose
+    // binary only knows upstream migrations: tolerate migration rows written
+    // by newer official versions instead of failing validation.
+    sqlx::migrate!()
+        .set_ignore_missing(true)
+        .run(&pool)
+        .await?;
+    if let Err(err) = ensure_fork_schema(&pool).await {
+        tracing::warn!("Failed to ensure ChocoModrinth schema: {err}");
+    }
     record_current_app_version(&pool).await?;
 
     if let Err(err) = stale_data_cleanup(&pool).await {
@@ -62,6 +71,28 @@ async fn open_app_db_pool(db_path: &Path) -> crate::Result<Pool<Sqlite>> {
         .max_lifetime(None)
         .connect_with(conn_options)
         .await?)
+}
+
+/// Schema additions ChocoModrinth needs on top of the upstream migrations.
+/// These are applied directly instead of through a migration file so the
+/// `_sqlx_migrations` table stays byte-identical to the official app's —
+/// a fork migration row would fail checksum validation in the official
+/// binary. When adding to this list, also apply the same statements to the
+/// sqlx offline scratch database before running `cargo sqlx prepare`.
+async fn ensure_fork_schema(pool: &Pool<Sqlite>) -> sqlx::Result<()> {
+    let exists: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pragma_table_info('instances') WHERE name = 'compressed'",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    if exists == 0 {
+        sqlx::query("ALTER TABLE instances ADD COLUMN compressed INTEGER NOT NULL DEFAULT 0")
+            .execute(pool)
+            .await?;
+    }
+
+    Ok(())
 }
 
 async fn record_current_app_version(pool: &Pool<Sqlite>) -> crate::Result<()> {
